@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div style="margin-bottom: 20px;">
+    <a href="{{ url_for('clear_session') }}" class="button secondary" style="text-decoration: none; font-size: 14px; padding: 8px 16px;">← Start Over</a>
+</div>
+
+<h2>Reflection Session: {{ session_id }}</h2>
+{% if using_custom %}
+<div class="meta" style="margin:6px 0 10px 0;">Using designed prompts for this session</div>
+{% endif %}
+
+{% if probe_question %}
+<div class="insight" style="background:#fff7e6;">
+  <strong>Reflective question:</strong> {{ probe_question }}
+  <div class="meta">Optional prompt to deepen your thinking.</div>
+</div>
+{% endif %}
+{% if last_probe_cost %}
+<div class="meta" style="margin:6px 0 10px 0;">Last probe cost — tokens {{ last_probe_cost.total_tokens }} · ${{ '%.6f'|format(last_probe_cost.cost_usd) }} · {{ last_probe_cost.latency_ms }} ms · <a href="{{ url_for('audit_index') }}" target="_blank">Audit</a></div>
+{% endif %}
+
+<details style="margin: 10px 0;">
+  <summary style="cursor:pointer; font-weight:600;">Show context (previous responses and questions)</summary>
+  <div style="margin-top:10px;">
+    {% if session_context.responses %}
+      <h4>Previous Responses</h4>
+      {% for phase, data in session_context.responses.items() %}
+        <div class="meta" style="margin-bottom:8px;">
+          <strong>{{ phase.replace('_',' ').title() }}:</strong>
+          <span style="display:block;">{{ data.response }}</span>
+        </div>
+      {% endfor %}
+    {% else %}
+      <div class="meta">No prior responses yet.</div>
+    {% endif %}
+    <h4>Probing Questions</h4>
+    {% if session_context.probes and session_context.probes|length > 0 %}
+      <ul>
+        {% for p in session_context.probes %}
+          <li class="meta">[{{ p.phase or 'phase' }}] {{ p.question }} <span style="opacity:0.7;">— {{ p.timestamp }}</span></li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <div class="meta">No probing questions asked yet.</div>
+    {% endif %}
+  </div>
+  </details>
+
+<div class="progress">
+    {% set progress_pct = (prompt_data.phase_number / prompt_data.total_phases) * 100 %}
+    <div class="progress-bar" style="width: {{ progress_pct }}%"></div>
+</div>
+
+<p class="meta">
+    Phase {{ prompt_data.phase_number }} of {{ prompt_data.total_phases }}
+    • Type: <strong>{{ prompt_data.current_prompt.type }}</strong>
+    • Phase: <strong>{{ prompt_data.current_prompt.phase }}</strong>
+</p>
+
+<div class="card" style="background: #f8f9fa; border-left: 4px solid #3498db;">
+    <h3>Reflection Prompt:</h3>
+    <p style="font-size: 16px; line-height: 1.6;">{{ prompt_data.current_prompt.prompt }}</p>
+</div>
+
+<form id="response-form" method="POST" action="{{ url_for('submit_response') }}">
+    <input type="hidden" name="prompt_phase" value="{{ prompt_data.current_prompt.phase }}">
+
+    <div class="form-group">
+        <label for="response">Your Response:</label>
+        <textarea id="response" name="response" required placeholder="Take your time to reflect thoughtfully on this prompt...">{{ draft_text or '' }}</textarea>
+    </div>
+
+    <button type="submit">Submit Response & Continue</button>
+</form>
+
+<form method="POST" action="{{ url_for('save_draft') }}" style="display:inline-block; margin-top:10px;">
+  <input type="hidden" name="prompt_phase" value="{{ prompt_data.current_prompt.phase }}">
+  <input type="hidden" name="response" id="draft_hidden">
+  <button type="submit" class="secondary" onclick="document.getElementById('draft_hidden').value=document.getElementById('response').value;">Save Draft (local, no cost)</button>
+  <div class="meta">Stores your current text locally for this phase.</div>
+  </form>
+
+<form method="POST" action="{{ url_for('load_demo') }}" style="display:inline-block; margin-top:10px; margin-left:10px;">
+  <input type="hidden" name="prompt_phase" value="{{ prompt_data.current_prompt.phase }}">
+  <button type="submit" class="secondary">Load Demo Text</button>
+  <div class="meta">Optional sample text for this assignment type.</div>
+</form>
+
+<form id="probe-form" method="POST" action="{{ url_for('probe_question') }}" style="margin-top:10px;">
+  <input type="hidden" name="draft_text" id="probe_draft">
+  <button type="submit" class="secondary" onclick="document.getElementById('probe_draft').value=document.getElementById('response').value;">Ask a reflective question</button>
+  <div class="meta">Invokes LLM (logged as Probe). Returns one question; no answers or rewrites.</div>
+</form>
+
+{% if session_context.probes and session_context.probes|length > 0 %}
+<details style="margin-top:8px;">
+  <summary class="meta" style="cursor:pointer;">Recent probe questions</summary>
+  <ul style="margin-top:6px;">
+    {% for p in session_context.probes[-3:] %}
+      <li class="meta">[{{ p.phase or 'phase' }}] {{ p.question }}</li>
+    {% endfor %}
+  </ul>
+</details>
+{% endif %}
+
+<div class="card" style="margin-top:16px; background:#f8f9fa; border-left:4px solid #6c5ce7;">
+  <h4>Helpful nudges</h4>
+  <ul style="margin:6px 0 0 18px;">
+    <li class="meta">Be specific: include concrete examples or details.</li>
+    <li class="meta">Show evidence: what in your work supports your point?</li>
+    <li class="meta">Balance perspectives: compare strengths and limitations.</li>
+    <li class="meta">Plan forward: state how this changes your next steps.</li>
+  </ul>
+</div>
+
+<div class="meta" style="margin-top: 30px;">
+    <h4>Tips for This Phase:</h4>
+    {% if prompt_data.current_prompt.type == 'divergent' %}
+    <p>This is a <strong>divergent thinking</strong> phase. Open up possibilities, explore different angles, and don't worry about being conclusive yet.</p>
+    {% elif prompt_data.current_prompt.type == 'convergent' %}
+    <p>This is a <strong>convergent thinking</strong> phase. Start synthesizing your insights and drawing conclusions from your exploration.</p>
+    {% elif prompt_data.current_prompt.type == 'self_assessment' %}
+    <p>This is a <strong>self-assessment</strong> phase. Review your work against the assignment requirements and evaluate your readiness.</p>
+    {% else %}
+    <p>This is a <strong>scaffolded reflection</strong> phase. Use the guidance to structure your thinking about the topic.</p>
+    {% endif %}
+</div>
+{% endblock %}

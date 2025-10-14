@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Reflection MCP - Interactive Testing</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f8f9fa;
+            color: #333;
+        }
+        .card {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1, h2, h3 { color: #2c3e50; margin-top: 0; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 5px; font-weight: 600; }
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        textarea { min-height: 120px; resize: vertical; }
+        button {
+            background: #3498db;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover { background: #2980b9; }
+        button.secondary {
+            background: #95a5a6;
+        }
+        button.secondary:hover { background: #7f8c8d; }
+        .error { color: #e74c3c; background: #fadbd8; padding: 15px; border-radius: 4px; }
+        .success { color: #27ae60; background: #d5f4e6; padding: 15px; border-radius: 4px; }
+        .insight { background: #e8f4fd; padding: 15px; border-radius: 4px; margin: 10px 0; }
+        .progress {
+            background: #ecf0f1;
+            height: 6px;
+            border-radius: 3px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+        .progress-bar {
+            background: #3498db;
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+        .meta { font-size: 14px; color: #7f8c8d; }
+        .cost-info {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            border-left: 4px solid #27ae60;
+        }
+        .rubric-check {
+            display: inline-block;
+            margin-right: 15px;
+            font-size: 14px;
+        }
+        .rubric-check.met { color: #27ae60; }
+        .rubric-check.unmet { color: #e74c3c; }
+
+        /* Loading overlay */
+        #loading-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255,255,255,0.8);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+        .spinner {
+            width: 36px; height: 36px;
+            border: 4px solid #ddd;
+            border-top-color: #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div id="loading-overlay"><div class="spinner" aria-label="Loading"></div></div>
+    <div id="toast" style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#2c3e50;color:#fff;padding:10px 16px;border-radius:6px;display:none;z-index:3000;">
+      <span id="toast-text"></span>
+    </div>
+    <div class="card">
+        <div style="display:flex; align-items:center; justify-content:space-between;">
+          <h1>🧠 Reflection MCP Testing Interface</h1>
+          <div>
+            <a href="{{ url_for('settings') }}" class="button secondary" style="text-decoration:none;">Settings</a>
+            <a href="{{ url_for('audit_index') }}" class="button secondary" style="text-decoration:none; margin-left:8px;">Audit</a>
+            <a href="{{ url_for('doc_demo_script') }}" class="button secondary" style="text-decoration:none; margin-left:8px;">Demo Script</a>
+            <a id="feedback-link" href="#" class="button secondary" style="text-decoration:none; margin-left:8px;">Feedback</a>
+          </div>
+        </div>
+        {% block content %}{% endblock %}
+    </div>
+    <script>
+      // Smart Feedback: prefill email with page URL, timestamp, and user agent
+      (function(){
+        const el = document.getElementById('feedback-link');
+        if (!el) return;
+        el.addEventListener('click', function(e){
+          e.preventDefault();
+          const to = 'hallie@unity.edu';
+          const subj = '[LISA Brain] Feedback';
+          const when = new Date().toISOString();
+          const page = (location && location.href) ? location.href : '(unknown)';
+          const ua = navigator.userAgent || '(unknown)';
+          let body = '';
+          body += 'Time: ' + when + '\n';
+          body += 'Page: ' + page + '\n';
+          body += 'Browser: ' + ua + '\n';
+          body += '\nWhat happened (steps, expected vs actual):\n';
+          body += '\nVisible error message (if any):\n';
+          body += '\nAdditional notes:\n';
+          const url = 'mailto:' + encodeURIComponent(to)
+            + '?subject=' + encodeURIComponent(subj)
+            + '&body=' + encodeURIComponent(body);
+          try { window.location.href = url; } catch(_) { /* no-op */ }
+        });
+      })();
+      function showToast(msg, ms=1800){
+        const t = document.getElementById('toast');
+        const tt = document.getElementById('toast-text');
+        if (!t || !tt) return;
+        tt.textContent = msg;
+        t.style.display = 'block';
+        setTimeout(()=>{ t.style.display='none'; }, ms);
+      }
+      // Show a loading overlay on any form submit
+      document.addEventListener('DOMContentLoaded', () => {
+        const overlay = document.getElementById('loading-overlay');
+        document.querySelectorAll('form').forEach(f => {
+          f.addEventListener('submit', () => {
+            if (overlay) overlay.style.display = 'flex';
+          });
+        });
+      });
+    </script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>About Cost and Sustainability</h2>
+<div class="card">
+  <p>
+    This prototype shows verified AI usage only. Costs are computed from the provider’s
+    API response (<code>usage.prompt_tokens</code>, <code>usage.completion_tokens</code>) and current pricing for the selected model.
+    No estimates or token heuristics are used in the UI.
+  </p>
+  <p>
+    Data source: Reflection MCP logs stored locally under <code>.local_context/cost_logs/</code>.
+    Each session file contains the exact token counts and computed cost.
+  </p>
+  <p>
+    Sustainability notes are optional and shown only when verified costs exist. If enabled,
+    comparisons use configurable baselines:
+  </p>
+  <ul>
+    <li><code>EMAIL_COST_USD</code> (default 0.00004)</li>
+    <li><code>PRINT_PAGE_COST_USD</code> (default 0.05)</li>
+  </ul>
+  <p class="meta">
+    These are cost proxies, not energy/CO2 calculations. Disable comparisons if baselines are not maintained.
+  </p>
+  <p class="meta" style="margin-top:12px;">
+    LLM scoring risks & mitigations: <a href="{{ url_for('doc_llm_risks') }}">view in app</a> · or open <code>docs/reflection_llm_risk_mitigations.md</code> in the repo.
+  </p>
+</div>
+{% endblock %}

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Settings</h2>
+
+{% if message %}
+<div class="success">{{ message }}</div>
+{% endif %}
+
+<div class="card">
+  <h3>LLM Usage</h3>
+  <form method="POST">
+    <input type="hidden" name="toggle_llm" value="1">
+    <label style="display:flex; align-items:center; gap:10px;">
+      <input type="checkbox" name="llm_enabled" {% if llm_enabled %}checked{% endif %}>
+      Enable LLM features for this session
+    </label>
+    <div class="meta">When disabled, the system uses heuristic fallbacks and hides cost data.</div>
+    <div style="margin-top:10px;"><button type="submit">Save</button></div>
+  </form>
+  <div class="meta" style="margin-top:8px;">
+    LLM scoring risks & mitigations: <a href="{{ url_for('doc_llm_risks') }}">view</a> · or open <code>docs/reflection_llm_risk_mitigations.md</code> in the repo.
+  </div>
+</div>
+
+<div class="card">
+  <h3>OpenAI API Key</h3>
+  <p class="meta">Current (process): {{ current_key_masked or 'not set' }}</p>
+  <p class="meta">Saved (local secrets): {{ saved_key_masked or 'not saved' }}</p>
+
+  <form method="POST">
+    <label for="api_key">Set/Update API Key (stored in .local_context/secrets.env):</label>
+    <input type="password" id="api_key" name="api_key" placeholder="sk-...">
+    <div style="margin-top:10px;"><button type="submit">Save Key</button></div>
+  </form>
+  <div class="meta" style="margin-top:8px;">Keys are saved locally and not committed. Restart not required.</div>
+
+  <form method="POST" action="{{ url_for('settings_test_key') }}" style="margin-top:10px;">
+    <input type="hidden" name="test_key" value="1">
+    <button type="submit">Test Key (1-token echo)</button>
+  </form>
+</div>
+
+<div class="meta"><a href="{{ url_for('index') }}">Back</a></div>
+{% endblock %}

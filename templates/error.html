@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="error">
+    <h2>⚠️ Error</h2>
+    <p>{{ error }}</p>
+</div>
+
+<a href="{{ url_for('index') }}" class="button">← Back to Start</a>
+
+<div class="meta" style="margin-top: 30px;">
+    <h4>Common Issues:</h4>
+    <ul>
+        <li><strong>MCP Server not running:</strong> Make sure reflection-mcp is executable and working</li>
+        <li><strong>Missing OpenAI key:</strong> Check .env file has OPENAI_API_KEY set</li>
+        <li><strong>Session expired:</strong> Try starting a new reflection session</li>
+    </ul>
+</div>
+{% endblock %}

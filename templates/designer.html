@@ -1,0 +1,318 @@
+{% extends "base.html" %}
+{% block content %}
+  <h2>Reflection Designer</h2>
+  <div class="meta" id="status">Status: …</div>
+  <div class="card" style="margin-top:12px;">
+    <h3>1) Import from Canvas</h3>
+    <div class="form-group" style="display:flex; gap:10px; align-items:center;">
+      <label style="min-width:80px;">Course</label>
+      <select id="course" style="flex:1;"></select>
+      <label style="min-width:90px;">Assignment</label>
+      <select id="assignment" style="flex:1;"></select>
+      <button id="load_btn">Load</button>
+      <label class="meta" style="display:flex; align-items:center; gap:6px; margin:0;">
+        <input type="checkbox" id="ai_fill"> AI‑fill missing fields
+      </label>
+    </div>
+    <div class="meta">Live-first with DEV/BP filter; falls back to cache when live isn’t available.</div>
+  </div>
+  <div class="card">
+    <h3>2) Extracted Content</h3>
+    <div class="form-group" style="display:flex; gap:10px; align-items:center;">
+      <label style="min-width:160px;">Assignment Title</label>
+      <input id="title" type="text" placeholder="e.g., Search Comparison (DB vs Web)">
+    </div>
+    <div style="display:flex; gap:12px;">
+      <div class="form-group" style="flex:1;">
+        <label>Assignment Instructions</label>
+        <textarea id="instructions" readonly></textarea>
+      </div>
+      <div class="form-group" style="flex:1;">
+        <div style="display:flex; align-items:center; justify-content:space-between;">
+          <label>Learning Objectives</label>
+          <div>
+            <button id="btn_reextract" class="secondary" type="button">Re‑extract</button>
+            <button id="btn_clear_obj" class="secondary" type="button">Clear</button>
+          </div>
+        </div>
+        <textarea id="outcomes" placeholder="Objective 1\nObjective 2"></textarea>
+      </div>
+    </div>
+    <div class="form-group">
+      <div style="display:flex; align-items:center; justify-content:space-between;">
+        <label>Rubric (criteria)</label>
+        <div>
+          <button id="btn_suggest_rubric" class="secondary" type="button">Suggest Rubric (AI)</button>
+          <button id="btn_load_rubrics" class="secondary" type="button">Load Course Rubrics</button>
+          <select id="rubric_list" style="min-width:240px; display:none;"></select>
+          <button id="btn_apply_rubric" class="secondary" type="button" style="display:none;">Apply Selected</button>
+        </div>
+      </div>
+      <textarea id="rubric" placeholder='[{"id":"clarity","description":"Clarity and organization"}]'></textarea>
+    </div>
+  </div>
+  <div class="card">
+    <h3>3) Prompt Workflow</h3>
+    <div class="form-group" style="display:flex; gap:10px; align-items:center;">
+      <label style="min-width:60px;">Phases</label>
+      <select id="phases"><option>6</option><option>5</option><option>4</option></select>
+      <button id="btn_generate" class="secondary" type="button">Generate Phases (AI)</button>
+      <span class="meta" id="gen_cost"></span>
+    </div>
+    <div class="form-group">
+      <label>Phases (editable JSON)</label>
+      <textarea id="phases_json" placeholder='[{"phase":"context_capture","type":"divergent","prompt":"..."}]'></textarea>
+    </div>
+    <div>
+      <button id="btn_reset" class="secondary" type="button">Reset</button>
+      <button id="btn_use_next" type="button">Use for This Run</button>
+      <a id="btn_open_home" class="button secondary" href="{{ url_for('index') }}" style="text-decoration:none;">Open Reflection Home</a>
+    </div>
+  </div>
+  <div class="card">
+    <h3>4) Save & Export</h3>
+    <div class="form-group" style="display:flex; gap:10px; align-items:center;">
+      <label style="min-width:120px;">Template Slug</label>
+      <input id="tpl_slug" type="text" placeholder="e.g., dev_test000_intro">
+      <button id="btn_save_tpl" type="button">Save as Template</button>
+      <button id="btn_download" class="secondary" type="button">Download JSON</button>
+    </div>
+    <div class="insight" id="save_msg" style="display:none;"></div>
+  </div>
+        <section class="panel">
+          <h2>Import from Canvas</h2>
+          <div class="row">
+            <label>Course</label>
+            <select id="course"></select>
+            <label>Assignment</label>
+            <select id="assignment"></select>
+            <button id="load_btn" class="btn primary">Load</button>
+            <label class="row" style="gap:6px;">
+              <input type="checkbox" id="ai_fill"> AI‑fill missing fields
+            </label>
+          </div>
+          <div class="muted" id="status" style="margin-top:6px;">Status: …</div>
+        </section>
+
+        <section class="panel">
+          <h2>Extracted Content</h2>
+          <div class="row">
+            <label style="min-width:120px;">Assignment Title</label>
+            <input id="title" type="text" placeholder="e.g., Search Comparison (DB vs Web)">
+          </div>
+          <div class="row" style="margin-top:8px;">
+            <div style="flex:1;">
+              <label>Assignment Instructions (read‑only)</label>
+              <textarea id="instructions" readonly></textarea>
+            </div>
+            <div style="flex:1;">
+              <label>Learning Objectives</label>
+              <textarea id="outcomes" placeholder="Objective 1\nObjective 2"></textarea>
+              <div class="row" style="margin-top:6px;">
+                <button id="btn_reextract" class="btn">Re‑extract</button>
+                <button id="btn_clear_obj" class="btn ghost">Clear</button>
+              </div>
+            </div>
+          </div>
+          <div class="row" style="margin-top:8px; align-items:flex-start;">
+            <div style="flex:1;">
+              <label>Rubric (criteria)</label>
+              <textarea id="rubric" placeholder='[{"id":"clarity","description":"Clarity and organization"}]'></textarea>
+              <div class="row" style="margin-top:6px;">
+                <button id="btn_load_rubrics" class="btn">Load Course Rubrics</button>
+                <select id="rubric_list" style="min-width:260px; display:none;"></select>
+                <button id="btn_apply_rubric" class="btn ghost" style="display:none;">Apply Selected</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Prompt Workflow</h2>
+          <div class="row">
+            <label>Phases</label>
+            <select id="phases"><option>6</option><option>5</option><option>4</option></select>
+            <button id="btn_generate" class="btn">Generate</button>
+            <span class="muted" id="gen_cost"></span>
+          </div>
+          <div style="margin-top:8px;">
+            <label>Phases (editable JSON)</label>
+            <textarea id="phases_json" placeholder='[{"phase":"context_capture","type":"divergent","prompt":"..."}]'></textarea>
+          </div>
+          <div class="sticky-actions">
+            <button id="btn_reset" class="btn ghost">Reset</button>
+            <button id="btn_use_next" class="btn">Use for Next Session</button>
+            <a id="btn_open_home" class="btn primary" href="{{ url_for('index') }}" target="_blank">Open Reflection Home</a>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Save & Export</h2>
+          <div class="row">
+            <label>Template Slug</label>
+            <input id="tpl_slug" type="text" placeholder="e.g., dev_test000_intro">
+            <button id="btn_save_tpl" class="btn">Save as Template</button>
+            <button id="btn_download" class="btn">Download JSON</button>
+          </div>
+          <div class="notice" id="save_msg" style="margin-top:8px; display:none;"></div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const statusEl = document.getElementById('status');
+      const courseSel = document.getElementById('course');
+      const assignSel = document.getElementById('assignment');
+      const loadBtn = document.getElementById('load_btn');
+      const aiFill = document.getElementById('ai_fill');
+      const titleEl = document.getElementById('title');
+      const instrEl = document.getElementById('instructions');
+      const outcomesEl = document.getElementById('outcomes');
+      const btnReextract = document.getElementById('btn_reextract');
+      const btnClearObj = document.getElementById('btn_clear_obj');
+      const rubricEl = document.getElementById('rubric');
+      const btnLoadRubrics = document.getElementById('btn_load_rubrics');
+      const btnSuggestRubric = document.getElementById('btn_suggest_rubric');
+      const rubricList = document.getElementById('rubric_list');
+      const btnApplyRubric = document.getElementById('btn_apply_rubric');
+      const phasesSel = document.getElementById('phases');
+      const btnGenerate = document.getElementById('btn_generate');
+      const genCost = document.getElementById('gen_cost');
+      const phasesJson = document.getElementById('phases_json');
+      const btnReset = document.getElementById('btn_reset');
+      const btnUseNext = document.getElementById('btn_use_next');
+      const kCourse = document.getElementById('k_course');
+      const kAssign = document.getElementById('k_assign');
+      const kObj = document.getElementById('k_obj');
+      const kRub = document.getElementById('k_rub');
+      const tplSlug = document.getElementById('tpl_slug');
+      const btnSaveTpl = document.getElementById('btn_save_tpl');
+      const btnDownload = document.getElementById('btn_download');
+      const saveMsg = document.getElementById('save_msg');
+
+      async function refreshCanvasStatus() {
+        try { const rl = await fetch('{{ url_for('canvas_live_status') }}'); const s = rl.ok ? await rl.json(): {}; statusEl.textContent = s.live_ready? 'Status: Canvas Live' : ('Status: ' + (s.error||'Canvas not ready')); } catch { statusEl.textContent = 'Status: unknown'; }
+      }
+
+      async function loadCourses() {
+        try {
+          // Prefer live courses
+          let data=null, ok=false;
+          try { const rl=await fetch('{{ url_for('canvas_live_courses') }}'); ok=rl.ok; data= ok? await rl.json(): null; } catch {}
+          if (!ok) { const rc=await fetch('{{ url_for('canvas_list_courses') }}'); ok=rc.ok; data= ok? await rc.json(): null; }
+          if (!ok || !data) throw new Error('courses');
+          // Filter DEV/BP (UI layer)
+          const all = data.courses||[];
+          let list = all.filter(c => { const cc=String(c.course_code||'').toUpperCase(); const nm=String(c.name||'').toUpperCase(); return cc.startsWith('DEV')||cc.startsWith('BP')||nm.includes('DEV')||nm.includes('BP'); });
+          if (!list.length) list = all;
+          courseSel.innerHTML='';
+          list.forEach(c=>{ const o=document.createElement('option'); o.value=c.id; o.textContent=`${c.course_code||c.id} — ${c.name||''}`; courseSel.appendChild(o); });
+          if (list.length) await loadAssignments(list[0].id);
+        } catch { statusEl.textContent = 'Failed to load courses'; }
+      }
+
+      async function loadAssignments(courseId) {
+        try {
+          let data=null, ok=false;
+          try { const rl=await fetch(`/canvas/live/assignments/${String(courseId)}`); ok=rl.ok; data= ok? await rl.json(): null; } catch {}
+          if (!ok) { const rc=await fetch(`/canvas/assignments/${String(courseId)}`); ok=rc.ok; data= ok? await rc.json(): null; }
+          if (!ok || !data) throw new Error('assignments');
+          const assigns = data.assignments||[];
+          assignSel.innerHTML='';
+          assigns.forEach(a=>{ const o=document.createElement('option'); o.value=a.id; o.textContent=`${a.name}`; assignSel.appendChild(o); });
+        } catch { statusEl.textContent = 'Failed to load assignments'; }
+      }
+
+      courseSel.addEventListener('change', ()=> loadAssignments(courseSel.value));
+      btnReextract.addEventListener('click', async ()=>{
+        const cid = courseSel.value; if (!cid) return;
+        try { const r= await fetch(`/canvas/live/course_objectives/${String(cid)}`); if (r.ok){ const ob=await r.json(); const arr = ob.objectives||[]; outcomesEl.value = (arr||[]).join('\n'); kObj.textContent = String(arr.length||0); } } catch {}
+      });
+      btnClearObj.addEventListener('click', ()=>{ outcomesEl.value=''; kObj.textContent='0'; });
+
+      btnLoadRubrics.addEventListener('click', async ()=>{
+        const cid = courseSel.value; if (!cid) return;
+        try { const r= await fetch(`/canvas/live/course_rubrics/${String(cid)}`); if (!r.ok) throw 0; const data=await r.json(); const rubs = data.rubrics||[]; rubricList.innerHTML=''; rubs.forEach(rb=>{ const o=document.createElement('option'); o.value=JSON.stringify(rb); o.textContent=`${rb.id} — ${rb.title}`; rubricList.appendChild(o); }); rubricList.style.display=rubs.length?'inline-block':'none'; btnApplyRubric.style.display=rubs.length?'inline-block':'none'; if (!rubs.length) statusEl.textContent='No course rubrics available.'; } catch { statusEl.textContent='Failed to load course rubrics'; }
+      });
+
+      btnApplyRubric.addEventListener('click', ()=>{
+        try { const sel = rubricList.value; if (!sel) return; const rb = JSON.parse(sel); if (Array.isArray(rb.criteria)) { rubricEl.value = JSON.stringify(rb.criteria, null, 2); kRub.textContent = String((rb.criteria||[]).length); } } catch {}
+      });
+
+      btnSuggestRubric.addEventListener('click', async ()=>{
+        // Use design_generate to infer a rubric when rubric field empty
+        try { if ((rubricEl.value||'').trim()) { showToast('Rubric already present'); return; }
+          const body = { assignment_title: titleEl.value || 'Assignment', outcomes: (outcomesEl.value||'').split('\n').filter(x=>x.trim()), rubric: [], constraints: { phases: parseInt(phasesSel.value||'6',10) } };
+          const resp = await fetch('{{ url_for('design_generate') }}', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+          const gen = await resp.json(); if (!resp.ok) { statusEl.textContent='Rubric suggest failed: '+(gen.error||''); return; }
+          if (Array.isArray(gen.inferred_rubric) && gen.inferred_rubric.length) { rubricEl.value = JSON.stringify(gen.inferred_rubric, null, 2); kRub.textContent = String(gen.inferred_rubric.length); showToast('Rubric suggested (AI)'); } else { showToast('No rubric inferred'); }
+        } catch { statusEl.textContent='Rubric suggest error'; }
+      });
+
+      loadBtn.addEventListener('click', async ()=>{
+        const cid = courseSel.value; const aid = assignSel.value; if (!cid || !aid) return;
+        try {
+          let data=null, ok=false;
+          try { const rf= await fetch(`/canvas/live/assignment_full/${String(cid)}/${String(aid)}`); ok = rf.ok; data = ok? await rf.json(): null; } catch {}
+          if (!ok) { const rb = await fetch(`/canvas/live/assignment/${String(cid)}/${String(aid)}`); ok = rb.ok; data = ok? await rb.json(): null; }
+          if (!ok && !data) { const rc = await fetch(`/canvas/assignment/${String(cid)}/${String(aid)}`); ok = rc.ok; data = ok? await rc.json(): null; }
+          if (!ok || !data) throw 0;
+          titleEl.value = data.title||''; instrEl.value = data.instructions||'';
+          kCourse.textContent = courseSel.options[courseSel.selectedIndex]?.textContent || '—';
+          kAssign.textContent = assignSel.options[assignSel.selectedIndex]?.textContent || '—';
+          if (Array.isArray(data.rubric) && data.rubric.length) { rubricEl.value = JSON.stringify(data.rubric, null, 2); kRub.textContent = String(data.rubric.length); }
+          // Objectives
+          try { const ro = await fetch(`/canvas/live/course_objectives/${String(cid)}`); if (ro.ok) { const ob=await ro.json(); const arr = ob.objectives||[]; if (arr.length) { outcomesEl.value = arr.join('\n'); kObj.textContent = String(arr.length); } } } catch {}
+          // AI fill
+          if (aiFill.checked) {
+            try {
+              const body = { assignment_title: titleEl.value || 'Assignment', outcomes: (outcomesEl.value||'').split('\n').filter(x=>x.trim()), rubric: rubricEl.value? JSON.parse(rubricEl.value): [], constraints: { phases: parseInt(phasesSel.value||'6',10) } };
+              const resp = await fetch('{{ url_for('design_generate') }}', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+              const gen = await resp.json();
+              if (resp.ok) {
+                if ((!rubricEl.value || rubricEl.value.trim()==='[]') && Array.isArray(gen.inferred_rubric) && gen.inferred_rubric.length) { rubricEl.value = JSON.stringify(gen.inferred_rubric, null, 2); kRub.textContent = String(gen.inferred_rubric.length); }
+                if (!phasesJson.value && Array.isArray(gen.phases)) { phasesJson.value = JSON.stringify(gen.phases, null, 2); }
+                const c = gen.cost_info || {}; genCost.textContent = `tokens ${c.total_tokens||0} · $${(c.cost_usd||0).toFixed? (c.cost_usd||0).toFixed(5):(c.cost_usd||0)}`;
+                statusEl.textContent = 'AI filled missing fields.';
+              } else { statusEl.textContent = 'AI fill failed: ' + (gen.error||''); }
+            } catch { /* ignore */ }
+          }
+        } catch { statusEl.textContent = 'Failed to load assignment'; }
+      });
+
+      btnGenerate.addEventListener('click', async ()=>{
+        try {
+          const body = { assignment_title: titleEl.value || 'Assignment', outcomes: (outcomesEl.value||'').split('\n').filter(x=>x.trim()), rubric: rubricEl.value? JSON.parse(rubricEl.value): [], constraints: { phases: parseInt(phasesSel.value||'6',10) } };
+          const resp = await fetch('{{ url_for('design_generate') }}', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+          const gen = await resp.json();
+          if (!resp.ok) { statusEl.textContent = 'Generation failed: ' + (gen.error||''); return; }
+          phasesJson.value = JSON.stringify(gen.phases||[], null, 2);
+          const c = gen.cost_info || {}; genCost.textContent = `tokens ${c.total_tokens||0} · $${(c.cost_usd||0).toFixed? (c.cost_usd||0).toFixed(5):(c.cost_usd||0)}`;
+          statusEl.textContent = 'Proposed phases ready.';
+        } catch { statusEl.textContent = 'Generate error'; }
+      });
+
+      btnReset.addEventListener('click', ()=>{ phasesJson.value=''; genCost.textContent=''; });
+      btnUseNext.addEventListener('click', async ()=>{
+        try { const phases = JSON.parse(phasesJson.value||'[]'); if (!Array.isArray(phases) || !phases.length) { statusEl.textContent='No phases to apply.'; return; }
+          const r = await fetch('{{ url_for('design_use_next') }}', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phases, slug: (tplSlug.value||'') }) });
+          const d = await r.json(); if (!r.ok) { statusEl.textContent = 'Apply failed: ' + (d.error||''); return; }
+          statusEl.textContent = 'Applied to next session.'; try { showToast('Will use these prompts for next run'); } catch {}
+        } catch { statusEl.textContent='Apply error'; }
+      });
+
+      btnSaveTpl.addEventListener('click', async ()=>{
+        try { const slug = (tplSlug.value||'').trim() || 'designer_template'; const content = { assignment_title:titleEl.value||'', outcomes:(outcomesEl.value||'').split('\n').filter(x=>x.trim()), rubric: rubricEl.value? JSON.parse(rubricEl.value): [], constraints:{ phases: parseInt(phasesSel.value||'6',10) }, phases: (JSON.parse(phasesJson.value||'[]')||[]) };
+          const r = await fetch('{{ url_for('design_save') }}', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ slug, content }) }); const d= await r.json(); if (r.ok) { saveMsg.style.display='block'; saveMsg.textContent = 'Saved: ' + d.path; try { showToast('Template saved'); } catch {} } else { saveMsg.style.display='block'; saveMsg.textContent='Save failed: ' + (d.error||''); }
+        } catch { saveMsg.style.display='block'; saveMsg.textContent='Save error'; }
+      });
+
+      btnDownload.addEventListener('click', ()=>{
+        try { const obj = { title:titleEl.value, outcomes:(outcomesEl.value||'').split('\n').filter(x=>x.trim()), rubric: rubricEl.value? JSON.parse(rubricEl.value): [], phases: JSON.parse(phasesJson.value||'[]') }; const blob = new Blob([JSON.stringify(obj,null,2)], {type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='designer_export.json'; a.click(); } catch {}
+      });
+
+      // Init
+      refreshCanvasStatus();
+      loadCourses();
+    </script>
+{% endblock %}

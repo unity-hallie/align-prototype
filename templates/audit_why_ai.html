@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Why AI Feedback — Aggregate</h2>
+<div class="card">
+  <h3>Averages (1–5)</h3>
+  <ul>
+    <li class="meta">Adaptive prompts: {{ '%.2f'|format(averages.adaptive_prompts) if averages.adaptive_prompts is not none else '—' }} (n={{ counts.adaptive_prompts }})</li>
+    <li class="meta">Grounded feedback: {{ '%.2f'|format(averages.grounded_feedback) if averages.grounded_feedback is not none else '—' }} (n={{ counts.grounded_feedback }})</li>
+    <li class="meta">Goal alignment: {{ '%.2f'|format(averages.goal_alignment) if averages.goal_alignment is not none else '—' }} (n={{ counts.goal_alignment }})</li>
+    <li class="meta">Actionable readiness: {{ '%.2f'|format(averages.actionable_readiness) if averages.actionable_readiness is not none else '—' }} (n={{ counts.actionable_readiness }})</li>
+    <li class="meta">Prefer over worksheet: {{ '%.2f'|format(averages.prefer_over_worksheet) if averages.prefer_over_worksheet is not none else '—' }} (n={{ counts.prefer_over_worksheet }})</li>
+  </ul>
+</div>
+
+<h3>Recent Feedback</h3>
+{% if records %}
+  <ul>
+  {% for r in records %}
+    <li class="meta">
+      {{ r.role or 'role' }} · {{ r.assignment_type or 'assignment' }} · session {{ r.session_id }} · ratings {{ r.ratings }}
+      {% if r.comments %}<div>{{ r.comments }}</div>{% endif %}
+    </li>
+  {% endfor %}
+  </ul>
+{% else %}
+  <div class="meta">No feedback records found yet.</div>
+{% endif %}
+{% endblock %}
+

@@ -1,0 +1,743 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% if not key_present or not llm_enabled %}
+<div class="error" style="border:2px solid #c00; padding:14px; font-size:16px;">
+  <strong>LLM key required</strong> — AI features are disabled. Nothing will run until an API key is set and enabled.
+  <div class="meta" style="margin-top:6px;">
+    • Click <a href="{{ url_for('settings') }}">Settings</a> to paste your key (saved locally in <code>.local_context/secrets.env</code>).<br>
+    • Don’t have a key? See <a href="https://platform.openai.com/docs/quickstart" target="_blank">OpenAI Quickstart</a> or ask Hallie to provision one.
+  </div>
+  <div style="margin-top:10px; display:flex; gap:8px;">
+    <a href="{{ url_for('settings') }}" class="button">Open Settings</a>
+    <form method="POST" action="{{ url_for('settings_test_key') }}">
+      <button type="submit" class="secondary">Test Key (after saving)</button>
+    </form>
+    <form method="POST" action="{{ url_for('settings') }}" style="display:flex; gap:6px; align-items:center;">
+      <input type="password" name="api_key" placeholder="sk-..." style="min-width:220px;">
+      <button type="submit" class="secondary">Quick Save Key</button>
+    </form>
+    <button type="button" class="secondary" id="open-key-help">Get a Key Help</button>
+    <button type="button" class="secondary" id="open-win-help">On Windows?</button>
+  </div>
+</div>
+{% endif %}
+{% if key_present and llm_enabled and demo_ready %}
+<div class="success" style="border:2px solid #2ecc71; padding:14px; font-size:16px;">
+  <strong>Demo Ready</strong> — {{ demo_msg }}
+  <div class="meta" style="margin-top:6px;">Tip: Open <a href="{{ url_for('doc_demo_script') }}">Demo Script</a> and follow the 5‑minute flow.</div>
+  </div>
+{% endif %}
+<p>Test the structured reflection system with interactive prompts and verified cost tracking.</p>
+
+{% if session.custom_prompts_next %}
+<div class="insight"><strong>Preset queued:</strong> Using a designed prompt set for the next session{% if session.custom_prompts_preset_slug %} ({{ session.custom_prompts_preset_slug }}){% endif %}. You can start when ready.</div>
+{% endif %}
+
+<form id="start-form" method="POST" action="{{ url_for('start_reflection') }}">
+    <div class="form-group">
+        <label for="student_id">Student ID:</label>
+        <input type="text" id="student_id" name="student_id" value="test_student" required>
+    </div>
+
+    <div class="form-group">
+        <label for="assignment_type">Assignment Type:</label>
+        <select id="assignment_type" name="assignment_type" required>
+            <option value="search_comparison">Search Comparison (Academic DB vs Google)</option>
+            <option value="generic">Generic Assignment</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="assignment_context">Assignment Context (optional):</label>
+        <textarea id="assignment_context" name="assignment_context" placeholder="Describe the assignment or paste rubric details..."></textarea>
+    </div>
+
+    <details class="form-group">
+        <summary style="cursor:pointer; font-weight:600;">Advanced: Instructor Guidance & Guardrails (optional)</summary>
+        <div style="margin-top:10px;">
+            <label for="ai_instructions">Instructor Guidance (shown to students in summary):</label>
+            <textarea id="ai_instructions" name="ai_instructions" maxlength="500" placeholder="e.g., Emphasize metacognition and tie insights to course outcomes. Avoid rewriting student work."></textarea>
+            <div class="meta">Max 500 characters.</div>
+
+            <label for="rubric_config" style="margin-top:10px; display:block;">Rubric (JSON, optional):</label>
+            <textarea id="rubric_config" name="rubric_config" placeholder='e.g., [{"id":"specific_examples","description":"Provides specific examples"}]'></textarea>
+            <div class="meta">Leave empty to use the default rubric for this assignment.</div>
+
+            <div style="display:flex; gap:12px; margin-top:10px;">
+                <div style="flex:1;">
+                    <label for="gr_temperature">Temperature (0–1):</label>
+                    <input type="number" step="0.1" min="0" max="1" id="gr_temperature" name="gr_temperature" placeholder="0.1">
+                </div>
+                <div style="flex:1;">
+                    <label for="gr_max_tokens">Max Output Tokens (≤200):</label>
+                    <input type="number" min="1" max="200" id="gr_max_tokens" name="gr_max_tokens" placeholder="200">
+                </div>
+            </div>
+
+            <div style="margin-top:10px; display:flex; align-items:center; gap:8px;">
+                <input type="checkbox" id="autofill_demo" name="autofill_demo">
+                <label for="autofill_demo" style="margin:0;">Auto-fill demo text when empty (per phase)</label>
+            </div>
+            <input type="hidden" id="custom_prompts" name="custom_prompts" value="">
+        </div>
+    </details>
+
+    <button type="submit" {% if not key_present or not llm_enabled %}disabled title="Set and test your API key in Settings first"{% endif %}>Start Reflection Session</button>
+</form>
+
+<div style="margin-top:12px;">
+  <a href="{{ url_for('designer_view') }}" class="secondary">Open Designer</a>
+  <div class="meta">Propose/edit prompts before starting. Designer is a full page.</div>
+  <div id="designer_warning_main" style="display:none; margin-top:6px; padding:8px; border-radius:6px; background:#fff3f3; color:#8a1f1f;">
+    Designer is unavailable: <span id="designer_warning_main_msg"></span>
+  </div>
+</div>
+
+<details style="margin-top:10px;">
+  <summary style="cursor:pointer; font-weight:600;">Examples & Templates</summary>
+  <div class="form-group" style="margin-top:8px;">
+    <label>Choose an example/template</label>
+    <select id="ex_select"></select>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button id="ex_use_next" class="secondary">Use For Next Session</button>
+    <button id="ex_edit" class="secondary">Load into Design Modal</button>
+  </div>
+  <div id="ex_status" class="meta"></div>
+</details>
+
+<!-- Legacy designer modal removed; use /designer -->
+<!-- <dialog id="design-modal" style="width: min(720px, 95%); border: none; border-radius: 8px; padding: 0;"> -->
+  <div style="padding:20px;">
+    <h3>Design Prompt Workflow</h3>
+    <div class="meta">LLM required. This action is cost-logged.</div>
+    <div id="designer_warning_modal" style="display:none; margin-top:6px; padding:8px; border-radius:6px; background:#fff3f3; color:#8a1f1f;">Designer is unavailable: <span id="designer_warning_modal_msg"></span></div>
+    <div id="d_preset_row" class="meta" style="display:none; margin-top:6px;">Preset: <span id="d_preset"></span></div>
+    <div class="form-group" style="margin-top:10px;">
+      <label>Assignment Title</label>
+      <input id="d_title" type="text" placeholder="e.g., Search Comparison (DB vs Google)">
+    </div>
+  <div class="form-group">
+      <label>Assignment Instructions (optional)</label>
+      <textarea id="d_instructions" placeholder="Paste assignment directions or context here..."></textarea>
+    </div>
+    <div class="form-group">
+      <label>Learning Outcomes (one per line)</label>
+      <textarea id="d_outcomes" placeholder="Outcome 1\nOutcome 2"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Rubric (JSON array of {id,description}, optional)</label>
+      <textarea id="d_rubric" placeholder='Optional: [{"id":"specific_examples","description":"Provides specific examples"}]'></textarea>
+      <div class="meta">If omitted, the designer tool may propose an inferred rubric for review.</div>
+    </div>
+  <div class="form-group" style="display:flex; gap:12px;">
+      <div style="flex:1;">
+        <label>Learner Level</label>
+        <select id="d_level"><option>introductory</option><option>intermediate</option><option>advanced</option></select>
+      </div>
+      <div style="flex:1;">
+        <label>Phases</label>
+        <input id="d_phases" type="number" min="3" max="8" value="6">
+      </div>
+    </div>
+    <div class="form-group" style="display:flex; gap:8px;">
+      <button id="d_load_defaults" type="button" class="secondary">Load Defaults from Assignment Type</button>
+      <button id="d_autofill_missing" type="button" class="secondary">Auto‑fill Missing</button>
+      <div class="meta">Prefill fields using a built‑in example for the selected Assignment Type, or infer from provided fields.</div>
+    </div>
+    <div class="form-group">
+      <label>Constraints (JSON, optional)</label>
+      <textarea id="d_constraints" placeholder='{"tone":"supportive","max_prompt_length":300}'></textarea>
+    </div>
+    <div class="form-group" style="display:flex; gap:8px;">
+      <button id="d_generate">Generate with LLM (logged)</button>
+      <button id="d_close" type="button" class="secondary">Close</button>
+    </div>
+    <div id="d_status" class="meta"></div>
+    <div id="d_results" style="margin-top:10px; display:none;">
+      <label>Proposed Phases (editable JSON array)</label>
+      <textarea id="d_phases_json" style="min-height:180px;"></textarea>
+      <div class="meta" id="d_cost"></div>
+      <div id="d_inferred" style="margin-top:10px; display:none;">
+        <h4>Inferred Rubric (for review)</h4>
+        <ul id="d_inferred_list" style="margin-top:6px;"></ul>
+        <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+          <button id="d_copy_inferred" type="button" class="secondary">Copy to Rubric Field</button>
+          <div class="meta">Copies inferred items into the Rubric JSON input above.</div>
+        </div>
+        <div class="meta" style="margin-top:6px;">This rubric was inferred by the designer tool because no rubric was provided. Review and adjust as needed.</div>
+      </div>
+      <div style="margin-top:8px; display:flex; gap:8px;">
+        <button id="d_use">Use For Next Session</button>
+        <button id="d_save" type="button" class="secondary">Save as Assignment Type</button>
+      </div>
+    </div>
+  </div> -->
+
+<dialog id="win-help-modal" style="width: min(560px, 95%); border: none; border-radius: 8px; padding: 0;">
+  <div style="padding:20px;">
+    <h3>Windows Quick Start</h3>
+    <p class="meta">Two easiest ways to run the app on Windows:</p>
+    <ol style="margin-top:8px;">
+      <li><strong>PowerShell</strong> (no bash required):
+        <pre style="background:#f4f4f4; padding:8px; border-radius:6px;">$env:PORT = 5054; python .\reflection_ui\app.py</pre>
+      </li>
+      <li><strong>Git Bash</strong> (if installed):
+        <pre style="background:#f4f4f4; padding:8px; border-radius:6px;">bash reflection_ui/start_ui.sh --port 5054</pre>
+      </li>
+    </ol>
+    <p class="meta">Then open <code>http://localhost:5054</code>, go to Settings, paste your API key, and click “Test Key (1-token echo)”.</p>
+    <div style="margin-top:12px; display:flex; gap:8px;">
+      <button id="win_help_close" class="secondary" type="button">Close</button>
+      <a class="button" href="{{ url_for('settings') }}">Open Settings</a>
+    </div>
+  </div>
+  </dialog>
+
+<dialog id="key-help-modal" style="width: min(560px, 95%); border: none; border-radius: 8px; padding: 0;">
+  <div style="padding:20px;">
+    <h3>Get an OpenAI API Key</h3>
+    <ol style="margin-top:8px;">
+      <li>Go to <a href="https://platform.openai.com/" target="_blank">platform.openai.com</a> and sign in.</li>
+      <li>Open <a href="https://platform.openai.com/api-keys" target="_blank">API Keys</a> and click “Create new secret key”.</li>
+      <li>Copy the key (starts with <code>sk-</code>).</li>
+      <li>Paste it in the box on the home page (Quick Save Key) or in <a href="{{ url_for('settings') }}">Settings</a>.</li>
+      <li>Click “Test Key (1-token echo)” to verify with a real request ID.</li>
+    </ol>
+    <div class="meta" style="margin-top:8px;">Don’t have access? Ask Hallie to provision a key. Keys are saved locally under <code>.local_context/secrets.env</code> and never committed.</div>
+    <div style="margin-top:12px; display:flex; gap:8px;">
+      <button id="key_help_close" class="secondary" type="button">Close</button>
+      <a class="button" href="{{ url_for('settings') }}">Open Settings</a>
+    </div>
+  </div>
+  </dialog>
+
+<script>
+  const modal = document.getElementById('design-modal');
+  // Designer modal removed
+  const startForm = document.getElementById('start-form');
+  const customPromptsInput = document.getElementById('custom_prompts');
+  const keyHelpModal = document.getElementById('key-help-modal');
+  const keyHelpOpen = document.getElementById('open-key-help');
+  const keyHelpClose = document.getElementById('key_help_close');
+  const winHelpModal = document.getElementById('win-help-modal');
+  const winHelpOpen = document.getElementById('open-win-help');
+  const winHelpClose = document.getElementById('win_help_close');
+  const ciStatus = document.getElementById('ci_status');
+  const ciCourse = document.getElementById('ci_course');
+  const ciAssign = document.getElementById('ci_assignment');
+  const ciRefresh = document.getElementById('ci_refresh');
+  const ciLoad = document.getElementById('ci_load');
+  const ciAIFill = document.getElementById('ci_ai_fill');
+  const ciLoadRubrics = document.getElementById('ci_load_rubrics');
+  const ciRubricSelect = document.getElementById('ci_rubric_select');
+  const ciApplyRubric = document.getElementById('ci_apply_rubric');
+
+  async function refreshDesignerStatus(showModalBanner=false) {
+    try {
+      const r = await fetch('{{ url_for('design_status') }}');
+      if (!r.ok) throw new Error('status fetch failed');
+      const s = await r.json();
+      const ok = !!(s.key_present && s.llm_enabled);
+      if (genBtn) genBtn.disabled = !ok;
+      if (openBtn) openBtn.disabled = !ok;
+      const msg = !s.key_present ? 'Missing API key. Open Settings to test/save a key.' : (!s.llm_enabled ? 'LLM is disabled for this session. Enable in Settings.' : '');
+      if (!ok && warnMain && warnMainMsg) { warnMainMsg.textContent = msg; warnMain.style.display = 'block'; } else if (warnMain) { warnMain.style.display = 'none'; }
+      if (showModalBanner && warnModal && warnModalMsg) {
+        if (!ok) { warnModalMsg.textContent = msg; warnModal.style.display = 'block'; } else { warnModal.style.display = 'none'; }
+      }
+    } catch (e) {
+      // Ignore status errors
+    }
+  }
+
+  // Initial status and periodic refresh
+  refreshDesignerStatus(false);
+  setInterval(()=>refreshDesignerStatus(false), 15000);
+
+  async function canvasStatus() {
+    try {
+      // Prefer live status; fallback to cache status
+      let liveMsg = '';
+      try {
+        const rl = await fetch('{{ url_for('canvas_live_status') }}');
+        if (rl.ok) {
+          const sl = await rl.json();
+          if (sl.live_ready) liveMsg = `live: ${sl.base_url}`; else if (sl.error) liveMsg = `live: ${sl.error}`; else liveMsg = 'live: not ready';
+        }
+      } catch {}
+      const rc = await fetch('{{ url_for('canvas_status') }}');
+      const sc = rc.ok ? await rc.json() : {};
+      const msg = [];
+      if (liveMsg) msg.push(liveMsg);
+      if (sc.cache_available) msg.push(`cache: ${sc.cached_courses} courses`); else msg.push('cache: none');
+      if (!liveMsg && sc.base_url) msg.push(`base: ${sc.base_url}`);
+      if (ciStatus) ciStatus.textContent = msg.join(' · ');
+    } catch { if (ciStatus) ciStatus.textContent = 'status: unavailable'; }
+  }
+
+  async function canvasLoadCourses() {
+    try {
+      // Try live first
+      let data = null; let ok = false;
+      try { const rl = await fetch('{{ url_for('canvas_live_courses') }}'); ok = rl.ok; data = ok ? await rl.json() : null; } catch {}
+      if (!ok) { const rc = await fetch('{{ url_for('canvas_list_courses') }}'); ok = rc.ok; data = ok ? await rc.json() : null; }
+      if (!ok || !data) throw new Error('courses');
+      const all = (data.courses||[]);
+      // Filter for DEV courses (by course_code or name)
+      let list = all.filter(c => {
+        const code = String(c.course_code||'').toUpperCase();
+        const name = String(c.name||'').toUpperCase();
+        return code.startsWith('DEV') || name.includes('DEV');
+      });
+      if (!list.length) list = all; // fallback if nothing matches
+      const opts = list.map(c => ({value: c.id, label: `${c.course_code||c.id} — ${c.name||''}`}));
+      ciCourse.innerHTML = '';
+      opts.forEach(o=>{ const el=document.createElement('option'); el.value=o.value; el.textContent=o.label; ciCourse.appendChild(el); });
+      if (opts.length) await canvasLoadAssignments(opts[0].value);
+    } catch (e) {
+      ciCourse.innerHTML = '';
+      const el=document.createElement('option'); el.textContent='No cached courses'; el.value=''; ciCourse.appendChild(el);
+      ciAssign.innerHTML = '';
+      const el2=document.createElement('option'); el2.textContent='—'; el2.value=''; ciAssign.appendChild(el2);
+    }
+  }
+
+  async function canvasLoadAssignments(courseId) {
+    if (!courseId) return;
+    try {
+      let data = null; let ok = false;
+      try { const rl = await fetch(`/canvas/live/assignments/${String(courseId)}`); ok = rl.ok; data = ok ? await rl.json() : null; } catch {}
+      if (!ok) { const rc = await fetch(`/canvas/assignments/${String(courseId)}`); ok = rc.ok; data = ok ? await rc.json() : null; }
+      if (!ok || !data) throw new Error('assignments');
+      const opts = (data.assignments||[]).map(a => ({value: a.id, label: `${a.id} — ${a.name}`}));
+      ciAssign.innerHTML = '';
+      opts.forEach(o=>{ const el=document.createElement('option'); el.value=o.value; el.textContent=o.label; ciAssign.appendChild(el); });
+    } catch (e) {
+      ciAssign.innerHTML = '';
+      const el=document.createElement('option'); el.textContent='No cached assignments'; el.value=''; ciAssign.appendChild(el);
+    }
+  }
+
+  if (ciCourse) ciCourse.addEventListener('change', () => canvasLoadAssignments(ciCourse.value));
+  if (ciRefresh) ciRefresh.addEventListener('click', async ()=>{ await canvasStatus(); await canvasLoadCourses(); });
+  if (ciLoadRubrics) ciLoadRubrics.addEventListener('click', async ()=>{
+    const courseId = ciCourse.value; if (!courseId) return;
+    try {
+      const r = await fetch(`/canvas/live/course_rubrics/${String(courseId)}`);
+      if (!r.ok) throw new Error('rubrics');
+      const data = await r.json();
+      const rubs = data.rubrics||[];
+      ciRubricSelect.innerHTML = '';
+      rubs.forEach(rb => { const o=document.createElement('option'); o.value = JSON.stringify(rb); o.textContent = `${rb.id} — ${rb.title}`; ciRubricSelect.appendChild(o); });
+      ciRubricSelect.style.display = rubs.length? 'inline-block':'none';
+      ciApplyRubric.style.display = rubs.length? 'inline-block':'none';
+      if (!rubs.length) statusEl.textContent = 'No course rubrics available.';
+    } catch (e) {
+      statusEl.textContent = 'Failed to load course rubrics.';
+    }
+  });
+  if (ciApplyRubric) ciApplyRubric.addEventListener('click', ()=>{
+    try { const sel = ciRubricSelect.value; if (!sel) return; const rb = JSON.parse(sel); if (Array.isArray(rb.criteria)) { document.getElementById('d_rubric').value = JSON.stringify(rb.criteria, null, 2); FIELD_IDS.forEach(saveField); statusEl.textContent='Applied course rubric.'; } } catch {}
+  });
+  if (ciLoad) ciLoad.addEventListener('click', async ()=>{
+    const courseId = ciCourse.value;
+    const aId = ciAssign.value;
+    if (!courseId || !aId) return;
+    try {
+      // Prefer full assignment with rubric
+      let data = null; let ok = false;
+      try { const rl = await fetch(`/canvas/live/assignment_full/${String(courseId)}/${String(aId)}`); ok = rl.ok; data = ok ? await rl.json() : null; } catch {}
+      if (!ok) { // fall back to basic assignment (title/instructions)
+        const rb = await fetch(`/canvas/live/assignment/${String(courseId)}/${String(aId)}`); ok = rb.ok; data = ok ? await rb.json() : null;
+      }
+      if (!ok && !data) { const rc = await fetch(`/canvas/assignment/${String(courseId)}/${String(aId)}`); ok = rc.ok; data = ok ? await rc.json() : null; }
+      if (!ok || !data) throw new Error('assignment');
+      // Populate designer fields
+      document.getElementById('d_title').value = data.title || '';
+      document.getElementById('d_instructions').value = data.instructions || '';
+      // If rubric present, populate rubric JSON
+      if (Array.isArray(data.rubric) && data.rubric.length) {
+        try { document.getElementById('d_rubric').value = JSON.stringify(data.rubric, null, 2); } catch {}
+      }
+      // Attempt to load learning objectives from course
+      try {
+        const ro = await fetch(`/canvas/live/course_objectives/${String(courseId)}`);
+        if (ro.ok) {
+          const ob = await ro.json();
+          if (Array.isArray(ob.objectives) && ob.objectives.length) {
+            document.getElementById('d_outcomes').value = ob.objectives.join('\n');
+          }
+        }
+      } catch {}
+      // Optionally AI-fill missing fields
+      if (ciAIFill && ciAIFill.checked) {
+        try {
+          const title = document.getElementById('d_title').value || document.getElementById('assignment_type')?.value;
+          const outcomes = (document.getElementById('d_outcomes').value || '').split('\n').filter(x=>x.trim());
+          const rubric = document.getElementById('d_rubric').value ? JSON.parse(document.getElementById('d_rubric').value) : [];
+          const constraints = { phases: parseInt(document.getElementById('d_phases').value || '6', 10) };
+          const body = { assignment_title: title, outcomes, rubric, constraints };
+          const resp = await fetch('{{ url_for('design_generate') }}', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+          const gen = await resp.json();
+          if (resp.ok) {
+            if ((!rubric || rubric.length===0) && Array.isArray(gen.inferred_rubric) && gen.inferred_rubric.length) {
+              document.getElementById('d_rubric').value = JSON.stringify(gen.inferred_rubric, null, 2);
+            }
+            if (!(document.getElementById('d_phases_json').value||'') && Array.isArray(gen.phases)) {
+              document.getElementById('d_phases_json').value = JSON.stringify(gen.phases||[], null, 2);
+              document.getElementById('d_results').style.display = 'block';
+            }
+            statusEl.textContent = 'AI filled missing fields.';
+          } else {
+            statusEl.textContent = 'AI fill failed: ' + (gen.error||'');
+          }
+        } catch (e) { /* ignore */ }
+      }
+      FIELD_IDS.forEach(saveField);
+      statusEl.textContent = `Imported from Canvas ${ok ? 'live' : 'cache'}: course ${courseId}, assignment ${aId}`;
+      if (modal && !modal.open) modal.showModal();
+    } catch (e) {
+      statusEl.textContent = 'Failed to import from Canvas cache.';
+    }
+  });
+
+  // Initial Canvas UI refresh
+  canvasStatus();
+  canvasLoadCourses();
+
+  // Auto-open designer modal when requested by server flag
+  const OPEN_DESIGNER = {{ 'true' if open_designer else 'false' }};
+  if (OPEN_DESIGNER && modal && !modal.open) {
+    // slight delay to let status populate
+    setTimeout(()=>{ try { modal.showModal(); } catch(_) {} }, 150);
+  }
+
+  if (openBtn) openBtn.addEventListener('click', () => { if (modal) modal.showModal(); });
+  if (closeBtn) closeBtn.addEventListener('click', () => { if (modal) modal.close(); });
+  if (keyHelpOpen) keyHelpOpen.addEventListener('click', () => { if (keyHelpModal) keyHelpModal.showModal(); });
+  if (keyHelpClose) keyHelpClose.addEventListener('click', () => { if (keyHelpModal) keyHelpModal.close(); });
+  if (winHelpOpen) winHelpOpen.addEventListener('click', () => { if (winHelpModal) winHelpModal.showModal(); });
+  if (winHelpClose) winHelpClose.addEventListener('click', () => { if (winHelpModal) winHelpModal.close(); });
+  async function ensureFieldsPopulated() {
+    const titleEl = document.getElementById('d_title');
+    const instrEl = document.getElementById('d_instructions');
+    const outEl = document.getElementById('d_outcomes');
+    const rubEl = document.getElementById('d_rubric');
+    let usedTemplate = false;
+    if (!titleEl.value && !instrEl.value && !outEl.value && !rubEl.value) {
+      try { const r = await loadTemplateForAssignmentType(); const tpl = r.data; usedTemplate = true;
+        if (tpl.title) titleEl.value = tpl.title;
+        if (tpl.assignment_instructions) instrEl.value = tpl.assignment_instructions;
+        if (Array.isArray(tpl.outcomes)) outEl.value = (tpl.outcomes||[]).join('\n');
+        if (Array.isArray(tpl.rubric)) rubEl.value = JSON.stringify(tpl.rubric||[], null, 2);
+      } catch {}
+    }
+    if (!rubEl.value && outEl.value) {
+      const outs = outEl.value.split('\n').map(s=>s.trim()).filter(Boolean);
+      const rub = outs.map((o,i)=>({ id: 'crit_'+(i+1), description: o }));
+      rubEl.value = JSON.stringify(rub, null, 2);
+    }
+    if (!outEl.value && rubEl.value) {
+      try { const rub = JSON.parse(rubEl.value); const descs = Array.isArray(rub)? rub.map(c=>c.description||'').filter(Boolean):[]; outEl.value = descs.join('\n'); } catch {}
+    }
+    if (!instrEl.value) {
+      const t = titleEl.value || 'Assignment';
+      const outs = (outEl.value||'').split('\n').filter(Boolean);
+      const list = outs.length? ('\n- '+outs.join('\n- ')) : '';
+      instrEl.value = `Complete the ${t}. Address the following outcomes:${list}`.trim();
+    }
+    FIELD_IDS.forEach(saveField);
+    return usedTemplate;
+  }
+
+  if (genBtn) genBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    await refreshDesignerStatus(true);
+    statusEl.textContent = 'Generating...';
+    results.style.display = 'none';
+    costEl.textContent = '';
+    try {
+      await ensureFieldsPopulated();
+      const outcomes = (document.getElementById('d_outcomes').value || '').split('\n').filter(x=>x.trim());
+      const rubric = JSON.parse(document.getElementById('d_rubric').value || '[]');
+      const constraints = document.getElementById('d_constraints').value ? JSON.parse(document.getElementById('d_constraints').value) : {};
+      const body = {
+        assignment_title: document.getElementById('d_title').value || document.getElementById('assignment_type')?.value,
+        learner_level: document.getElementById('d_level').value,
+        assignment_instructions: document.getElementById('d_instructions').value || '',
+        outcomes,
+        rubric,
+        constraints: Object.assign({}, constraints, { phases: parseInt(document.getElementById('d_phases').value || '6', 10) })
+      };
+      const resp = await fetch('{{ url_for('design_generate') }}', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const data = await resp.json();
+      if (!resp.ok) {
+        let msg = data.error || 'Generation failed';
+        if (data.reason) msg += ` (${data.reason})`;
+        if (data.hint) msg += ` — ${data.hint}`;
+        throw new Error(msg);
+      }
+      phasesJson.value = JSON.stringify(data.phases || [], null, 2);
+      results.style.display = 'block';
+      statusEl.textContent = 'Proposed phases ready. Review/edit before use.';
+      if (data.cost_info) {
+        const c = data.cost_info; costEl.textContent = `Last design call — tokens ${c.total_tokens} | $${c.cost_usd?.toFixed?.(6) || c.cost_usd} | ${c.latency_ms} ms`;
+      }
+      // Show inferred rubric if present
+      const inf = data.inferred_rubric;
+      const infBox = document.getElementById('d_inferred');
+      const infList = document.getElementById('d_inferred_list');
+      infList.innerHTML = '';
+      if (Array.isArray(inf) && inf.length) {
+        window._inferredRubric = inf;
+        inf.forEach(item => {
+          const li = document.createElement('li');
+          if (item && typeof item === 'object') {
+            li.textContent = `${item.id || ''} — ${item.description || ''}`.trim();
+          } else {
+            li.textContent = String(item);
+          }
+          infList.appendChild(li);
+        });
+        infBox.style.display = 'block';
+      } else {
+        window._inferredRubric = null;
+        infBox.style.display = 'none';
+      }
+    } catch (e) {
+      statusEl.textContent = 'Error: ' + e.message + ' — Open Settings to test/save API key, then retry.';
+    }
+  });
+  // Copy inferred rubric into rubric input
+  const copyInfBtn = document.getElementById('d_copy_inferred');
+  if (copyInfBtn) copyInfBtn.addEventListener('click', () => {
+    try {
+      const inf = window._inferredRubric;
+      if (!Array.isArray(inf) || !inf.length) return;
+      const target = document.getElementById('d_rubric');
+      target.value = JSON.stringify(inf, null, 2);
+      statusEl.textContent = 'Inferred rubric copied to Rubric field.';
+    } catch (e) {
+      statusEl.textContent = 'Failed to copy inferred rubric.';
+    }
+  });
+  if (useBtn) useBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    try {
+      const arr = JSON.parse(phasesJson.value || '[]');
+      if (!Array.isArray(arr) || !arr.length) throw new Error('Invalid phases JSON');
+      customPromptsInput.value = JSON.stringify(arr);
+      // Persist to session as a backup to ensure usage
+      try {
+        const slug = (document.getElementById('d_title').value || 'custom_editor');
+        const r = await fetch('{{ url_for('design_use_next') }}', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phases: arr, slug }) });
+        if (r.ok) { try { showToast('Preset queued for next session'); } catch(e) {} }
+      } catch {}
+      modal.close();
+      // Focus the form; user can now Start Reflection
+      document.getElementById('student_id')?.focus();
+    } catch (e) {
+      statusEl.textContent = 'Invalid JSON: ' + e.message;
+    }
+  });
+  if (saveBtn) saveBtn.addEventListener('click', async () => {
+    try {
+      const slug = (document.getElementById('d_title').value || 'assignment').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
+      const content = JSON.parse(phasesJson.value || '[]');
+      const resp = await fetch('{{ url_for('design_save') }}', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ slug, content }) });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Save failed');
+      statusEl.textContent = `Saved as ${slug}.json`;
+    } catch (e) { statusEl.textContent = 'Error: ' + e.message; }
+  });
+
+  // Load examples
+  const exSelect = document.getElementById('ex_select');
+  const exStatus = document.getElementById('ex_status');
+  const exUse = document.getElementById('ex_use_next');
+  const exEdit = document.getElementById('ex_edit');
+  (async function loadExamples(){
+    try {
+      const resp = await fetch('{{ url_for('design_examples') }}');
+      const data = await resp.json();
+      (data.examples || []).forEach(ex => {
+        const opt = document.createElement('option');
+        opt.value = ex.slug; opt.textContent = `${ex.title} (${ex.source}, ${ex.phases_count} phases)`;
+        exSelect.appendChild(opt);
+      });
+      if (!exSelect.options.length) {
+        const opt = document.createElement('option');
+        opt.textContent = 'No examples found'; exSelect.appendChild(opt);
+      }
+    } catch (e) { exStatus.textContent = 'Failed to load examples'; }
+  })();
+
+  async function fetchExample(slug){
+    const resp = await fetch(`{{ url_for('design_get_example', slug='__SLUG__') }}`.replace('__SLUG__', encodeURIComponent(slug)));
+    if (!resp.ok) throw new Error('Example not found');
+    return await resp.json();
+  }
+
+  if (exUse) exUse.addEventListener('click', async (e)=>{
+    e.preventDefault(); exStatus.textContent = '';
+    const slug = exSelect.value; if (!slug) return;
+    try {
+      const data = await fetchExample(slug);
+      const phases = data.phases || [];
+      if (!Array.isArray(phases) || !phases.length) throw new Error('Invalid example');
+      customPromptsInput.value = JSON.stringify(phases);
+      try { const r = await fetch('{{ url_for('design_use_next') }}', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phases, slug }) }); if (r.ok) { try { showToast('Preset queued for next session'); } catch(e) {} } } catch {}
+      exStatus.textContent = `Loaded ${phases.length} phases for next session.`;
+    } catch (e) { exStatus.textContent = 'Error: ' + e.message; }
+  });
+
+  if (exEdit) exEdit.addEventListener('click', async (e)=>{
+    e.preventDefault(); exStatus.textContent = '';
+    const slug = exSelect.value; if (!slug) return;
+    try {
+      const data = await fetchExample(slug);
+      phasesJson.value = JSON.stringify(data.phases || [], null, 2);
+      results.style.display = 'block';
+      // Also prefill modal fields when template provides them
+      if (data.title) document.getElementById('d_title').value = data.title;
+      if (data.assignment_instructions) document.getElementById('d_instructions').value = data.assignment_instructions;
+      if (Array.isArray(data.outcomes)) document.getElementById('d_outcomes').value = (data.outcomes || []).join('\n');
+      if (Array.isArray(data.rubric)) document.getElementById('d_rubric').value = JSON.stringify(data.rubric || [], null, 2);
+      if (data.constraints && typeof data.constraints === 'object') {
+        document.getElementById('d_constraints').value = JSON.stringify(data.constraints || {}, null, 2);
+        if (data.constraints.phases) document.getElementById('d_phases').value = data.constraints.phases;
+      }
+      if (data.slug) { const row = document.getElementById('d_preset_row'); const tag = document.getElementById('d_preset'); if (row && tag) { tag.textContent = data.slug; row.style.display = 'block'; } }
+      if (modal) modal.showModal();
+      statusEl.textContent = 'Loaded example into editor. Review/edit before use.';
+    } catch (e) { exStatus.textContent = 'Error: ' + e.message; }
+  });
+
+  // Load defaults from current assignment type selection
+  const loadDefaultsBtn = document.getElementById('d_load_defaults');
+  const autoFillBtn = document.getElementById('d_autofill_missing');
+
+  // Local persistence for modal fields (survives reloads)
+  const FIELD_IDS = ['d_title','d_instructions','d_outcomes','d_rubric','d_constraints','d_level','d_phases'];
+  function saveField(id){
+    try {
+      const el = document.getElementById(id); if (!el) return;
+      const val = (el.tagName === 'SELECT' || el.type === 'number') ? el.value : (el.value || '');
+      localStorage.setItem('reflection_design_'+id, val);
+    } catch {}
+  }
+  function restoreField(id){
+    try {
+      const el = document.getElementById(id); if (!el) return;
+      const val = localStorage.getItem('reflection_design_'+id);
+      if (val !== null && val !== undefined && val !== '') {
+        el.value = val;
+      }
+    } catch {}
+  }
+  // Attach listeners
+  FIELD_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('input', ()=>saveField(id));
+    el.addEventListener('change', ()=>saveField(id));
+  });
+  // Restore on load/open
+  FIELD_IDS.forEach(restoreField);
+  if (openBtn) openBtn.addEventListener('click', () => { FIELD_IDS.forEach(restoreField); });
+
+  async function loadTemplateForAssignmentType() {
+    const atSel = document.getElementById('assignment_type');
+    const at = atSel ? atSel.value : 'generic';
+    const map = { 'search_comparison': 'search_comparison_v1', 'generic': 'generic_v1' };
+    const slug = map[at] || 'generic_v1';
+    const data = await fetchExample(slug);
+    return {slug, data};
+  }
+
+  if (loadDefaultsBtn) loadDefaultsBtn.addEventListener('click', async ()=>{
+    try {
+      const {slug, data} = await loadTemplateForAssignmentType();
+      phasesJson.value = JSON.stringify(data.phases || [], null, 2);
+      results.style.display = 'block';
+      if (data.title) document.getElementById('d_title').value = data.title;
+      if (data.assignment_instructions) document.getElementById('d_instructions').value = data.assignment_instructions;
+      if (Array.isArray(data.outcomes)) document.getElementById('d_outcomes').value = (data.outcomes || []).join('\n');
+      if (Array.isArray(data.rubric)) document.getElementById('d_rubric').value = JSON.stringify(data.rubric || [], null, 2);
+      if (data.constraints && typeof data.constraints === 'object') {
+        document.getElementById('d_constraints').value = JSON.stringify(data.constraints || {}, null, 2);
+        if (data.constraints.phases) document.getElementById('d_phases').value = data.constraints.phases;
+      }
+      FIELD_IDS.forEach(saveField);
+      statusEl.textContent = `Loaded defaults from ${slug}.`;
+      { const row = document.getElementById('d_preset_row'); const tag = document.getElementById('d_preset'); if (row && tag) { tag.textContent = slug; row.style.display = 'block'; } }
+      if (modal && !modal.open) modal.showModal();
+    } catch (e) { statusEl.textContent = 'Failed to load defaults: ' + e.message; }
+  });
+
+  // Auto-fill missing fields from template or from present data
+  if (autoFillBtn) autoFillBtn.addEventListener('click', async ()=>{
+    try {
+      const titleEl = document.getElementById('d_title');
+      const instrEl = document.getElementById('d_instructions');
+      const outEl = document.getElementById('d_outcomes');
+      const rubEl = document.getElementById('d_rubric');
+      const consEl = document.getElementById('d_constraints');
+      const levelEl = document.getElementById('d_level');
+      const phasesEl = document.getElementById('d_phases');
+
+      const hasAny = (titleEl.value || instrEl.value || outEl.value || rubEl.value);
+      let tpl = null; let slug = '';
+      if (!hasAny) {
+        const r = await loadTemplateForAssignmentType(); tpl = r.data; slug = r.slug;
+      }
+
+      // If rubric missing but outcomes present, infer rubric from outcomes
+      if (!rubEl.value && outEl.value) {
+        const outs = outEl.value.split('\n').map(s=>s.trim()).filter(Boolean);
+        const rub = outs.map((o,i)=>({ id: 'crit_'+(i+1), description: o }));
+        rubEl.value = JSON.stringify(rub, null, 2);
+      }
+      // If outcomes missing but rubric present, infer outcomes from rubric descriptions
+      if (!outEl.value && rubEl.value) {
+        try { const rub = JSON.parse(rubEl.value); const descs = Array.isArray(rub)? rub.map(c=>c.description||'').filter(Boolean):[]; outEl.value = descs.join('\n'); } catch {}
+      }
+      // If instructions missing, generate a simple prompt using title/outcomes
+      if (!instrEl.value) {
+        const t = titleEl.value || 'Assignment';
+        const outs = (outEl.value||'').split('\n').filter(Boolean);
+        const list = outs.length? ('\n- '+outs.join('\n- ')) : '';
+        instrEl.value = `Complete the ${t}. Address the following outcomes:${list}`.trim();
+      }
+      // Fill from template for still-missing fields
+      if (tpl) {
+        if (!titleEl.value && tpl.title) titleEl.value = tpl.title;
+        if (!instrEl.value && tpl.assignment_instructions) instrEl.value = tpl.assignment_instructions;
+        if (!outEl.value && Array.isArray(tpl.outcomes)) outEl.value = (tpl.outcomes||[]).join('\n');
+        if (!rubEl.value && Array.isArray(tpl.rubric)) rubEl.value = JSON.stringify(tpl.rubric||[], null, 2);
+        if (!consEl.value && tpl.constraints) consEl.value = JSON.stringify(tpl.constraints||{}, null, 2);
+        if (tpl.constraints && tpl.constraints.phases) phasesEl.value = tpl.constraints.phases;
+        statusEl.textContent = `Auto‑filled from ${slug}.`;
+      } else {
+        statusEl.textContent = 'Auto‑filled missing fields from present data.';
+      }
+      FIELD_IDS.forEach(saveField);
+      if (modal && !modal.open) modal.showModal();
+    } catch (e) {
+      statusEl.textContent = 'Auto‑fill failed: ' + e.message;
+    }
+  });
+</script>
+<div class="meta" style="margin-top: 30px;">
+    <h3>What This Tests:</h3>
+    <ul>
+        <li><strong>Structured Prompts:</strong> 6-phase reflection from divergent → convergent → self-assessment</li>
+        <li><strong>LLM Insights:</strong> Real OpenAI analysis of student responses</li>
+        <li><strong>Cost Tracking:</strong> Verified token usage and actual cost</li>
+        <li><strong>Rubric Alignment:</strong> Automatic checking against assignment criteria</li>
+        <li><strong>Readiness Assessment:</strong> Submission readiness evaluation</li>
+    </ul>
+</div>
+{% endblock %}

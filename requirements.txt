@@ -1,0 +1,7 @@
+# Reflection UI Dependencies
+# Standalone Flask UI for Reflection MCP
+
+Flask>=3.0.0
+requests>=2.31.0
+
+# All other imports are Python stdlib (json, os, sys, subprocess, pathlib, time, etc.)

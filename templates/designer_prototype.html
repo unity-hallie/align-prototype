@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Reflection Designer — Prototype</title>
+    <style>
+      :root {
+        --bg:#0f1220; --panel:#171a2b; --muted:#9fa6b2; --text:#e8ecf1; --accent:#5cc8ff; --ok:#28c281; --warn:#ffb649; --err:#ff5a6b; --border:#242842;
+      }
+      *{box-sizing:border-box}
+      body { margin:0; font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; color:var(--text); background: var(--bg); }
+      header { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--border); background: linear-gradient(180deg,#121630,#0f1220); position:sticky; top:0; z-index:3; }
+      header h1 { margin:0; font-size:16px; letter-spacing:.2px; }
+      .statusbar { display:flex; gap:12px; align-items:center; color:var(--muted); font-size:12px; }
+      .chip { padding:4px 8px; border-radius:999px; border:1px solid var(--border); background:#12162a; color:var(--muted); }
+      .chip.ok { color:#caffef; border-color:#254a3f; background:#11231c; }
+      .chip.warn { color:#fff0d5; border-color:#4a3f25; background:#241f11; }
+      .chip.err { color:#ffd6db; border-color:#4a2529; background:#2a1114; }
+      .wrap { display:grid; grid-template-columns:280px 1fr; gap:14px; padding:14px; }
+      nav { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:10px; position:sticky; top:64px; height:calc(100vh - 78px); overflow:auto; }
+      nav h3 { font-size:12px; text-transform:uppercase; color:var(--muted); margin:6px 8px; letter-spacing:.6px; }
+      .steps { list-style:none; margin:0; padding:0; }
+      .steps li { margin:4px 0; }
+      .step { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px; cursor:pointer; color:var(--muted); }
+      .step.active { background:#111428; color:var(--text); border:1px solid var(--border); }
+      .cnt { display:grid; gap:14px; }
+      .panel { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:14px; }
+      .panel h2 { margin:0 0 8px 0; font-size:15px; }
+      .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+      label { color:var(--muted); font-size:12px; }
+      select, input[type=text] { background:#0f1222; color:var(--text); border:1px solid var(--border); border-radius:8px; padding:8px 10px; min-width:220px; }
+      textarea { width:100%; min-height:120px; background:#0f1222; color:var(--text); border:1px solid var(--border); border-radius:8px; padding:10px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+      .btn { background:#192144; color:var(--text); border:1px solid var(--border); padding:8px 12px; border-radius:8px; cursor:pointer; }
+      .btn.primary { background:#143250; border-color:#1b4a70; }
+      .btn.ghost { background:transparent; border-color:var(--border); color:var(--muted); }
+      .grid { display:grid; gap:12px; }
+      .grid.cols-2 { grid-template-columns:1fr 1fr; }
+      .muted { color:var(--muted); font-size:12px; }
+      .kpi { display:flex; gap:8px; flex-wrap:wrap; }
+      .kpi .chip { font-size:11px; }
+      .divider { height:1px; background:var(--border); margin:8px 0; }
+      .sticky-actions { position:sticky; bottom:8px; display:flex; gap:10px; justify-content:flex-end; background:linear-gradient(180deg,rgba(15,18,32,0), rgba(15,18,32,.9)); padding-top:8px; }
+      .callout { border-left:3px solid var(--accent); padding:8px 10px; background:#0f1530; border-radius:6px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Reflection Designer</h1>
+      <div class="statusbar">
+        <span class="chip ok" title="Canvas connectivity">Canvas: Live</span>
+        <span class="chip" title="LLM usage">LLM: Optional</span>
+        <span class="chip" title="Policy">Policy: DEV_, BP_ prefixes</span>
+      </div>
+    </header>
+
+    <div class="wrap">
+      <nav>
+        <h3>Workflow</h3>
+        <ul class="steps">
+          <li><div class="step active">1. Select Course</div></li>
+          <li><div class="step">2. Select Assignment</div></li>
+          <li><div class="step">3. Extract & Review</div></li>
+          <li><div class="step">4. Design Prompts</div></li>
+          <li><div class="step">5. Save & Use</div></li>
+        </ul>
+        <div class="divider"></div>
+        <h3>Context</h3>
+        <div class="kpi">
+          <span class="chip">Course: <strong id="k_course">—</strong></span>
+          <span class="chip">Assignment: <strong id="k_assign">—</strong></span>
+          <span class="chip">Objectives: <strong id="k_obj">0</strong></span>
+          <span class="chip">Rubric items: <strong id="k_rub">0</strong></span>
+        </div>
+      </nav>
+
+      <main class="cnt">
+        <section class="panel" id="p_import">
+          <h2>Import from Canvas</h2>
+          <div class="row">
+            <label>Course</label>
+            <select id="course">
+              <option>DEV_TEST000 — The Testening</option>
+              <option>DEV_ANIM301 — ANIMAL HUSBANDRY AND GENETICS</option>
+              <option>BP-DE8W06.03.24_MARI605 — MARINE RESOURCES</option>
+            </select>
+            <label>Assignment</label>
+            <select id="assignment">
+              <option>Introductions</option>
+              <option>Week 1 Assignment — Research Paper</option>
+            </select>
+            <button class="btn primary">Load</button>
+            <label class="row" style="gap:6px;">
+              <input type="checkbox" id="ai_fill"> AI‑fill missing fields
+            </label>
+          </div>
+          <div class="muted" style="margin-top:6px;">Live‑first with policy filter (DEV_/BP_), cache fallback when unavailable.</div>
+        </section>
+
+        <section class="panel" id="p_extract">
+          <h2>Extracted Content</h2>
+          <div class="grid cols-2">
+            <div>
+              <label>Assignment Instructions (read‑only)</label>
+              <textarea readonly placeholder="Loaded assignment description (HTML→text)"></textarea>
+            </div>
+            <div>
+              <label>Learning Objectives (from syllabus/front page)</label>
+              <textarea id="outcomes" placeholder="• Objective 1\n• Objective 2"></textarea>
+              <div class="row" style="margin-top:6px;">
+                <button class="btn" title="Refresh from Canvas">Re‑extract</button>
+                <button class="btn ghost" title="Clear">Clear</button>
+              </div>
+            </div>
+          </div>
+          <div class="grid" style="margin-top:10px;">
+            <div>
+              <label>Rubric (criteria)</label>
+              <textarea id="rubric" placeholder='[{"id":"clarity","description":"Clarity and organization"}]'></textarea>
+              <div class="row" style="margin-top:6px;">
+                <button class="btn" title="Load course rubrics">Load Course Rubrics</button>
+                <select id="rubric_list" style="min-width:260px;"><option>—</option></select>
+                <button class="btn ghost" title="Apply">Apply Selected</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" id="p_design">
+          <h2>Prompt Workflow</h2>
+          <div class="grid cols-2">
+            <div>
+              <label>Assignment Title</label>
+              <input type="text" id="title" placeholder="e.g., Search Comparison (DB vs Web)">
+              <div class="row" style="margin-top:8px;">
+                <label>Phases</label>
+                <select id="phases"><option>6</option><option>5</option><option>4</option></select>
+                <button class="btn" title="Generate prompt workflow">Generate</button>
+              </div>
+            </div>
+            <div class="callout">
+              <div class="muted">LLM is optional. If enabled, it may propose phases and infer a rubric only when missing.</div>
+            </div>
+          </div>
+          <div class="grid" style="margin-top:10px;">
+            <div>
+              <label>Phases (editable JSON)</label>
+              <textarea id="phases_json" placeholder='[{"phase":"context_capture","type":"divergent","prompt":"..."}]'></textarea>
+            </div>
+          </div>
+          <div class="sticky-actions">
+            <button class="btn ghost">Reset</button>
+            <button class="btn">Preview</button>
+            <button class="btn primary">Use for Next Session</button>
+          </div>
+        </section>
+
+        <section class="panel" id="p_save">
+          <h2>Save & Export</h2>
+          <div class="row">
+            <button class="btn">Save as Template</button>
+            <button class="btn">Download JSON</button>
+            <span class="muted">Templates are stored under <code>.local_context/reflection_templates/</code>.</span>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+  </html>
+

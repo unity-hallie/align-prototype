@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Audit Downloads</h2>
+<p class="meta">Download raw JSON logs and session data (no AI processing). Session JSON = student inputs + prompts; Cost JSON = exact API usage + costs.</p>
+
+{% if sessions and sessions|length > 0 %}
+  <table style="width:100%; font-size:14px; border-collapse: collapse;">
+    <tr style="text-align:left; border-bottom:1px solid #ddd;">
+      <th style="padding:6px;">Session ID</th>
+      <th style="padding:6px;">Student</th>
+      <th style="padding:6px;">Assignment</th>
+      <th style="padding:6px;">Created</th>
+      <th style="padding:6px;">Progress</th>
+      <th style="padding:6px;">Cost</th>
+      <th style="padding:6px;">Downloads</th>
+      <th style="padding:6px;">Open</th>
+      <th style="padding:6px;">Bundle</th>
+    </tr>
+    {% for s in sessions %}
+    <tr style="border-bottom:1px solid #eee;">
+      <td style="padding:6px; word-break:break-all;">{{ s.session_id }}</td>
+      <td style="padding:6px;">{{ s.student_id or '-' }}</td>
+      <td style="padding:6px;">{{ s.assignment_type or '-' }}</td>
+      <td style="padding:6px;">{{ s.created_at or '-' }}</td>
+      <td style="padding:6px;">{{ s.responses_count }}/{{ s.total_phases or '?' }}</td>
+      <td style="padding:6px;">
+        {% if s.cost_total_usd is not none %}
+          ${{ '%.6f'|format(s.cost_total_usd) }}
+          <span class="meta">({{ s.cost_tokens or 0 }} tokens, {{ s.cost_calls or 0 }} calls)</span>
+        {% else %}
+          <span class="meta">—</span>
+        {% endif %}
+      </td>
+      <td style="padding:6px;">
+        <a href="{{ url_for('audit_raw', kind='session', session_id=s.session_id) }}">session</a>
+        {% if s.cost_exists %} · <a href="{{ url_for('audit_raw', kind='cost', session_id=s.session_id) }}">cost</a>{% endif %}
+        · <a href="{{ url_for('audit_zip', session_id=s.session_id) }}">zip</a>
+      </td>
+      <td style="padding:6px;"><a href="{{ url_for('summary_for_session', session_id=s.session_id) }}">Summary</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+{% else %}
+  <div class="meta">No sessions found.</div>
+{% endif %}
+
+<div class="meta" style="margin-top:10px;"><a href="{{ url_for('index') }}">Back</a></div>
+{% endblock %}

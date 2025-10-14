@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div style="margin-bottom: 20px;">
+    <a href="{{ url_for('index') }}" class="button secondary" style="text-decoration: none; font-size: 14px; padding: 8px 16px;">← Start New Reflection</a>
+</div>
+
+<h2>🎓 Reflection Complete!</h2>
+
+<div style="display:flex; gap:8px; align-items:center; margin:8px 0 16px 0;">
+  <span class="meta">View:</span>
+  <a href="{{ url_for('set_summary_view', mode='student') }}" class="button secondary" style="text-decoration:none; {{ 'background:#7f8c8d' if view_mode=='student' else '' }}">Student</a>
+  <a href="{{ url_for('set_summary_view', mode='instructor') }}" class="button secondary" style="text-decoration:none; {{ 'background:#7f8c8d' if view_mode=='instructor' else '' }}">Instructor</a>
+</div>
+
+<div class="success">
+    <strong>Session ID:</strong> {{ summary.session_id }}<br>
+    <strong>Student:</strong> {{ summary.student_id }}<br>
+    <strong>Assignment:</strong> {{ summary.assignment_type }}<br>
+    <strong>Status:</strong> {{ summary.completion_status }}<br>
+    <strong>Duration:</strong> {{ "%.1f"|format(session_duration) }} seconds
+</div>
+
+{% if regenerated %}
+<div class="error" style="background:#fff3cd; color:#856404;">
+  This summary was regenerated live. Results (insights, scoring, cost) reflect this run.
+  For raw inputs and cost logs, use the Audit page to download JSON.
+  Regeneration can differ slightly from earlier runs.
+  </div>
+{% endif %}
+
+  <form method="POST" action="{{ url_for('toggle_sustainability') }}" style="margin:8px 0;">
+    <button type="submit" class="secondary">{{ 'Hide' if show_sustainability else 'Show' }} Sustainability Notes</button>
+  </form>
+  {% if show_sustainability and environmental_impact and cost_data %}
+    <div class="cost-info" style="background: #e8f5e8; border-left-color: #27ae60;">
+        <h4>🌱 Sustainability Notes</h4>
+        <p><strong>{{ environmental_impact.email_comparison }}</strong></p>
+        {% if environmental_impact.paper_comparison %}
+        <p>{{ environmental_impact.paper_comparison }}</p>
+        {% endif %}
+        <p style="font-size: 14px; color: #666;">{{ environmental_impact.efficiency_message }}</p>
+    </div>
+  {% endif %}
+
+  <h3>🧠 Coaching Notes for You</h3>
+  <div class="form-group" style="margin:6px 0;">
+    <button type="button" class="secondary" onclick="copyCoaching()">Copy Coaching Notes</button>
+  </div>
+  {% if summary.applied_ai_instructions or summary.guardrails %}
+  <div class="cost-info" style="background:#f5f7fa; border-left-color:#3498db;">
+      <h4>⚙️ Applied Parameters</h4>
+      {% if summary.applied_ai_instructions %}
+      <p><strong>Instructor Guidance:</strong> {{ summary.applied_ai_instructions }}</p>
+      {% endif %}
+      {% if summary.guardrails %}
+      <p class="meta">Guardrails:
+        {% if summary.guardrails.temperature is defined %}
+          temperature={{ summary.guardrails.temperature }}
+        {% endif %}
+        {% if summary.guardrails.max_tokens is defined %}
+          {% if summary.guardrails.temperature is defined %} · {% endif %}max_tokens={{ summary.guardrails.max_tokens }}
+        {% endif %}
+      </p>
+      {% endif %}
+  </div>
+  {% endif %}
+{% if summary.insights %}
+    {% for insight in summary.insights %}
+    <div class="insight">
+        <strong>{{ loop.index }}.</strong> {{ insight }}
+    </div>
+    {% endfor %}
+{% else %}
+    <p class="meta">No insights generated (LLM may be unavailable)</p>
+{% endif %}
+
+<h3>📋 How Your Work Matches the Goals</h3>
+{% set all_met = summary.rubric_alignment.criteria_met and (summary.rubric_alignment.criteria_met|list|map('lower') and (summary.rubric_alignment.criteria_met|list)) %}
+{% set go = (summary.rubric_alignment.criteria_met and (summary.rubric_alignment.criteria_met.values()|list|reject('equalto', False)|list|length == summary.rubric_alignment.criteria_met|length)) %}
+<div class="card" style="background: {{ '#d5f4e6' if go else '#fadbd8' }};">
+  <strong>Ready to submit?</strong> {{ 'Yes — you matched the goals.' if go else 'Not yet — focus on the suggestions below.' }}
+  <div class="meta">Student view hides grading language; Instructor view shows full rubric details.</div>
+</div>
+<div style="margin-bottom: 20px;">
+    {% for criterion, met in summary.rubric_alignment.criteria_met.items() %}
+    <span class="rubric-check {{ 'met' if met else 'unmet' }}">
+        {{ '✅' if met else '❌' }} {{ criterion.replace('_', ' ').title() }}
+    </span>
+    {% if view_mode == 'instructor' and summary.rubric_alignment.details and summary.rubric_alignment.details.get(criterion) %}
+    <details style="margin:6px 0 14px 0;">
+      <summary class="meta" style="cursor:pointer;">Why</summary>
+      <div class="meta">
+        {{ summary.rubric_alignment.details.get(criterion).rationale or '' }}
+        {% if summary.rubric_alignment.details.get(criterion).evidence %}
+          <div style="margin-top:6px;">
+          Evidence:
+          <ul>
+            {% for ev in summary.rubric_alignment.details.get(criterion).evidence %}
+              <li class="meta">“{{ ev }}”</li>
+            {% endfor %}
+          </ul>
+          </div>
+        {% endif %}
+      </div>
+    </details>
+    {% endif %}
+    {% endfor %}
+</div>
+
+<h3>🚀 Submission Readiness</h3>
+<div class="card" style="background: {{ '#d5f4e6' if summary.readiness_assessment.overall == 'ready' else '#fadbd8' }};">
+    <strong>Overall:</strong> {{ summary.readiness_assessment.overall.title() }}
+    <ul style="margin: 10px 0 0 0;">
+        {% for suggestion in summary.readiness_assessment.suggestions %}
+        <li>{{ suggestion }}</li>
+        {% endfor %}
+    </ul>
+</div>
+<div class="form-group" style="margin:6px 0;">
+  <button type="button" class="secondary" onclick="copyReadiness()">Copy Readiness Checklist</button>
+  {% if summary.session_id %}
+    <a class="button secondary" style="text-decoration:none; margin-left:8px;" href="{{ url_for('audit_raw', kind='cost', session_id=summary.session_id) }}" target="_blank">Open Cost Log</a>
+  {% endif %}
+</div>
+
+<h3>💰 Cost Analysis</h3>
+<div class="cost-info">
+    {% if cost_data %}
+    <p style="color: #27ae60;"><strong>Verified Cost Data</strong></p>
+    <strong>Total Tokens:</strong> {{ "{:,}".format(cost_data.total_tokens) }}<br>
+    <strong>Actual Cost:</strong> ${{ "%.6f"|format(cost_data.total_cost_usd) }}<br>
+    {% if cost_data.api_calls_count is defined %}
+    <strong>Total API Calls:</strong> {{ cost_data.api_calls_count }}<br>
+    {% endif %}
+    <div class="meta" style="margin-top: 10px;">Data source: MCP logs (no estimates). · <a href="{{ url_for('about') }}" target="_blank">About</a></div>
+    {% else %}
+    <p><em>Cost data not available for this session.</em></p>
+    {% if no_api_key %}
+    <div class="meta">No API key detected — usage cost hidden (no estimates).</div>
+    {% endif %}
+    {% endif %}
+</div>
+
+<h3>🤔 Why AI? Was this helpful?</h3>
+{% if feedback_msg %}<div class="success">{{ feedback_msg }}</div>{% endif %}
+<details>
+  <summary style="cursor:pointer; font-weight:600;">Give quick feedback (10–20 seconds)</summary>
+  <form method="POST" action="{{ url_for('why_ai_feedback') }}" style="margin-top:10px;">
+    <div class="form-group">
+      <label>Role</label>
+      <select name="role"><option>student</option><option>designer</option><option>instructor</option><option>tester</option></select>
+    </div>
+    <div class="form-group" style="display:grid; grid-template-columns: 1fr 140px; gap:8px; align-items:center;">
+      <label>Adaptive prompts helped me go deeper</label>
+      <input type="number" name="adaptive_prompts" min="1" max="5" placeholder="1–5">
+      <label>Feedback referenced my own words</label>
+      <input type="number" name="grounded_feedback" min="1" max="5" placeholder="1–5">
+      <label>Goals felt clearer (what to improve)</label>
+      <input type="number" name="goal_alignment" min="1" max="5" placeholder="1–5">
+      <label>Readiness guidance was actionable</label>
+      <input type="number" name="actionable_readiness" min="1" max="5" placeholder="1–5">
+      <label>Prefer this over a static worksheet</label>
+      <input type="number" name="prefer_over_worksheet" min="1" max="5" placeholder="1–5">
+      <label>It was clear what the system was doing and why</label>
+      <input type="number" name="clarity_of_behavior" min="1" max="5" placeholder="1–5">
+    </div>
+    <div class="form-group">
+      <label>Comments (avoid PII; max 500 chars)</label>
+      <textarea name="comments" maxlength="500"></textarea>
+    </div>
+    <button type="submit">Submit Feedback</button>
+  </form>
+</details>
+
+<h3>📝 Full Response History</h3>
+<details style="margin-top: 20px;">
+    <summary style="cursor: pointer; font-weight: bold;">Show All Responses</summary>
+    {% for phase, response_data in summary.responses.items() %}
+    <div style="margin: 20px 0; padding: 15px; background: #f8f9fa; border-radius: 4px;">
+        <h4>{{ phase.replace('_', ' ').title() }}</h4>
+        <p style="margin-bottom: 10px; font-style: italic;">{{ response_data.response }}</p>
+        <div class="meta">Submitted: {{ response_data.timestamp }}</div>
+    </div>
+    {% endfor %}
+</details>
+
+<div class="meta" style="margin-top: 30px;">
+    <strong>Session Created:</strong> {{ summary.created_at }}<br>
+    <strong>Session Completed:</strong> {{ summary.completed_at }}
+</div>
+<script>
+  async function copyCoaching(){
+    try {
+      const items = ({{ summary.insights|tojson|safe }} || []).join('\n');
+      await navigator.clipboard.writeText(items);
+      try { showToast('Coaching notes copied'); } catch(e) {}
+    } catch(e) {}
+  }
+  async function copyReadiness(){
+    try {
+      const items = ({{ (summary.readiness_assessment.suggestions if summary.readiness_assessment else [])|tojson|safe }} || []).join('\n');
+      await navigator.clipboard.writeText(items);
+      try { showToast('Readiness checklist copied'); } catch(e) {}
+    } catch(e) {}
+  }
+</script>
+{% endblock %}
