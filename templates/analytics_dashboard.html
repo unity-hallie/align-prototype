@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analytics Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 28px;
+        }
+
+        .sessions-list {
+            display: grid;
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .session-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            cursor: pointer;
+            transition: all 0.2s;
+            border-left: 4px solid #007bff;
+        }
+
+        .session-card:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            transform: translateY(-2px);
+        }
+
+        .session-card.active {
+            border-left-color: #28a745;
+            background: #f9fff9;
+        }
+
+        .session-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .session-id {
+            font-family: monospace;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .session-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #007bff;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            margin-top: 5px;
+        }
+
+        .detail-view {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .detail-header h2 {
+            font-size: 20px;
+            color: #333;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+        }
+
+        .timeline {
+            border-left: 2px solid #ddd;
+            padding-left: 30px;
+            position: relative;
+        }
+
+        .event {
+            margin-bottom: 20px;
+            position: relative;
+        }
+
+        .event::before {
+            content: '';
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background: #007bff;
+            border-radius: 50%;
+            left: -37px;
+            top: 2px;
+            border: 2px solid white;
+            box-shadow: 0 0 0 2px #007bff;
+        }
+
+        .event.page_view::before {
+            background: #28a745;
+            box-shadow: 0 0 0 2px #28a745;
+        }
+
+        .event.click::before {
+            background: #ffc107;
+            box-shadow: 0 0 0 2px #ffc107;
+        }
+
+        .event.form_submit::before {
+            background: #e83e8c;
+            box-shadow: 0 0 0 2px #e83e8c;
+        }
+
+        .event.input_change::before {
+            background: #17a2b8;
+            box-shadow: 0 0 0 2px #17a2b8;
+        }
+
+        .event-type {
+            display: inline-block;
+            background: #f0f0f0;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-right: 10px;
+        }
+
+        .event-time {
+            font-size: 12px;
+            color: #999;
+            margin-top: 5px;
+        }
+
+        .event-details {
+            background: #f9f9f9;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 8px;
+            font-size: 12px;
+            color: #555;
+            font-family: monospace;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #007bff;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .empty {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .refresh-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .refresh-btn:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Analytics Dashboard</h1>
+
+        <div id="sessions" class="sessions-list">
+            <div class="loading">
+                <div class="spinner"></div>
+                Loading sessions...
+            </div>
+        </div>
+
+        <div id="detail" style="display: none;">
+            <div class="detail-view">
+                <div class="detail-header">
+                    <h2>Session Details</h2>
+                    <button class="close-btn" onclick="closeDetail()">✕</button>
+                </div>
+                <div id="eventTimeline" class="timeline"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentSessionId = null;
+
+        async function loadSessions() {
+            try {
+                const response = await fetch('/api/analytics/sessions');
+                const data = await response.json();
+
+                const sessionsDiv = document.getElementById('sessions');
+                if (!data.sessions || data.sessions.length === 0) {
+                    sessionsDiv.innerHTML = '<div class="empty">No analytics data yet. Visit some pages to start tracking.</div>';
+                    return;
+                }
+
+                sessionsDiv.innerHTML = data.sessions.map(session => {
+                    const created = new Date(session.created).toLocaleString();
+                    const lastActivity = new Date(session.last_activity).toLocaleString();
+
+                    return `
+                        <div class="session-card" onclick="loadSessionDetail('${session.session_id}')">
+                            <div class="session-header">
+                                <div>
+                                    <strong>Session ${session.session_id.substring(0, 16)}...</strong>
+                                    <div class="session-id">${session.session_id}</div>
+                                </div>
+                                <span>${created}</span>
+                            </div>
+                            <div class="session-stats">
+                                <div class="stat">
+                                    <div class="stat-value">${session.event_count}</div>
+                                    <div class="stat-label">Events</div>
+                                </div>
+                                <div class="stat">
+                                    <div class="stat-value">${session.pages}</div>
+                                    <div class="stat-label">Pages</div>
+                                </div>
+                                <div class="stat">
+                                    <div class="stat-value">${formatTime(session.last_activity - session.created)}</div>
+                                    <div class="stat-label">Duration</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.error('Failed to load sessions:', e);
+                document.getElementById('sessions').innerHTML = '<div class="empty">Error loading analytics data.</div>';
+            }
+        }
+
+        async function loadSessionDetail(sessionId) {
+            currentSessionId = sessionId;
+            try {
+                const response = await fetch(`/api/analytics/session/${sessionId}`);
+                const data = await response.json();
+
+                document.getElementById('sessions').style.display = 'none';
+                document.getElementById('detail').style.display = 'block';
+
+                const stats = data.session;
+                const timeline = document.getElementById('eventTimeline');
+
+                let html = `
+                    <div class="session-stats">
+                        <div class="stat">
+                            <div class="stat-value">${stats.event_count}</div>
+                            <div class="stat-label">Total Events</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${stats.pages.length}</div>
+                            <div class="stat-label">Pages Visited</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${formatTime(stats.duration_seconds * 1000)}</div>
+                            <div class="stat-label">Duration</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${stats.clicks}</div>
+                            <div class="stat-label">Clicks</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${stats.form_submissions}</div>
+                            <div class="stat-label">Forms</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${stats.input_changes}</div>
+                            <div class="stat-label">Inputs</div>
+                        </div>
+                    </div>
+                    <div class="timeline" style="margin-top: 30px;">
+                `;
+
+                data.events.forEach(event => {
+                    const time = new Date(event.timestamp).toLocaleTimeString();
+                    let details = '';
+
+                    if (event.type === 'page_view') {
+                        details = `Page: <strong>${event.page}</strong><br>Title: ${event.title}`;
+                    } else if (event.type === 'click') {
+                        details = `Element: <strong>${event.element}</strong><br>Text: ${event.text || '(no text)'}<br>ID: ${event.id || 'none'}`;
+                    } else if (event.type === 'form_submit') {
+                        details = `Form: <strong>${event.formName}</strong><br>Fields: ${event.fieldCount}`;
+                    } else if (event.type === 'input_change') {
+                        details = `Field: <strong>${event.fieldName}</strong><br>Type: ${event.fieldType}`;
+                    } else if (event.type === 'page_exit') {
+                        details = `Page: <strong>${event.page}</strong><br>Time on page: ${event.timeOnPageSeconds}s<br>Events: ${event.eventCount}`;
+                    }
+
+                    html += `
+                        <div class="event ${event.type}">
+                            <span class="event-type">${event.type.replace('_', ' ')}</span>
+                            <span class="event-time">${time}</span>
+                            <div class="event-details">${details}</div>
+                        </div>
+                    `;
+                });
+
+                html += '</div>';
+                timeline.innerHTML = html;
+            } catch (e) {
+                console.error('Failed to load session:', e);
+                alert('Error loading session details');
+            }
+        }
+
+        function closeDetail() {
+            currentSessionId = null;
+            document.getElementById('sessions').style.display = 'block';
+            document.getElementById('detail').style.display = 'none';
+        }
+
+        function formatTime(ms) {
+            const seconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const hours = Math.floor(minutes / 60);
+
+            if (hours > 0) {
+                return `${hours}h ${minutes % 60}m`;
+            } else if (minutes > 0) {
+                return `${minutes}m ${seconds % 60}s`;
+            } else {
+                return `${seconds}s`;
+            }
+        }
+
+        // Load sessions on page load
+        loadSessions();
+
+        // Auto-refresh every 10 seconds
+        setInterval(() => {
+            if (!currentSessionId) {
+                loadSessions();
+            }
+        }, 10000);
+    </script>
+</body>
+</html>

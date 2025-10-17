@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""
+Traffic Router CLI Tool
+
+Commands:
+  start          Start the traffic router on port 5004
+  status         Check router and backend health
+  metrics        View routing metrics
+  test           Test routing with sample requests
+"""
+
+import sys
+import json
+import time
+import urllib.request
+import urllib.error
+from pathlib import Path
+
+# Add parent directory to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from utils.traffic_router import TrafficRouter, RouterConfig
+
+
+def print_header(title: str):
+    """Print formatted header."""
+    print("\n" + "=" * 60)
+    print(f"  {title}")
+    print("=" * 60)
+
+
+def cmd_start():
+    """Start the traffic router."""
+    print_header("STARTING TRAFFIC ROUTER")
+    print("🌐 Router listening on port 5004")
+    print("   Health: http://localhost:5004/__router_health")
+    print("   Metrics: http://localhost:5004/__router_metrics")
+    print("\nPress Ctrl+C to stop")
+
+    from utils.traffic_router import start_router
+    start_router(port=5004)
+
+
+def cmd_status():
+    """Check router and backend health."""
+    print_header("TRAFFIC ROUTER STATUS")
+
+    router = TrafficRouter(RouterConfig())
+
+    # Check router health
+    try:
+        response = urllib.request.urlopen(
+            "http://localhost:5004/__router_health",
+            timeout=2
+        )
+        data = json.loads(response.read())
+        print(f"✅ Router: HEALTHY")
+        print(f"   Active port: {data['active_port']}")
+        print(f"   Active version: {data['active_version']}")
+    except Exception as e:
+        print(f"❌ Router: UNHEALTHY ({str(e)})")
+        return 1
+
+    # Check backend health
+    active_port = router.get_active_port()
+    if active_port:
+        try:
+            response = urllib.request.urlopen(
+                f"http://localhost:{active_port}/health",
+                timeout=2
+            )
+            data = json.loads(response.read())
+            version = "blue" if active_port == 5005 else "green"
+            print(f"✅ Backend ({version} on {active_port}): HEALTHY")
+            if "ok" in data:
+                print(f"   Status: {data['ok']}")
+        except Exception as e:
+            print(f"❌ Backend on {active_port}: UNHEALTHY ({str(e)})")
+    else:
+        print("❌ No active backend version")
+
+    print()
+    return 0
+
+
+def cmd_metrics():
+    """Display routing metrics."""
+    print_header("ROUTING METRICS")
+
+    try:
+        response = urllib.request.urlopen(
+            "http://localhost:5004/__router_metrics",
+            timeout=2
+        )
+        data = json.loads(response.read())
+
+        print(f"Total requests: {data['total_requests']}")
+        print(f"Successful: {data['successful_requests']}")
+        print(f"Failed: {data['failed_requests']}")
+        print(f"Success rate: {data['success_rate']:.1f}%")
+        print(f"Bytes proxied: {data['bytes_proxied']:,}")
+        print(f"Avg request time: {data['avg_request_time_ms']:.2f}ms")
+        print(f"\nVersion breakdown:")
+        for version, count in data['version_requests'].items():
+            print(f"  {version}: {count} requests")
+
+        print()
+        return 0
+    except Exception as e:
+        print(f"❌ Failed to fetch metrics: {e}")
+        return 1
+
+
+def cmd_test():
+    """Test routing with sample requests."""
+    print_header("TESTING TRAFFIC ROUTING")
+
+    try:
+        # Test 1: Health endpoint
+        print("📝 Test 1: Health endpoint")
+        response = urllib.request.urlopen("http://localhost:5004/health", timeout=2)
+        print(f"   Status: {response.status}")
+        print(f"   Response: {response.read().decode()[:100]}...")
+
+        # Test 2: Router health
+        print("\n📝 Test 2: Router health")
+        response = urllib.request.urlopen("http://localhost:5004/__router_health", timeout=2)
+        data = json.loads(response.read())
+        print(f"   Status: {data['status']}")
+        print(f"   Active port: {data['active_port']}")
+
+        # Test 3: Metrics
+        print("\n📝 Test 3: Metrics endpoint")
+        response = urllib.request.urlopen("http://localhost:5004/__router_metrics", timeout=2)
+        data = json.loads(response.read())
+        print(f"   Total requests: {data['total_requests']}")
+        print(f"   Success rate: {data['success_rate']:.1f}%")
+
+        print("\n✅ All routing tests passed!")
+        print()
+        return 0
+
+    except Exception as e:
+        print(f"❌ Test failed: {e}")
+        print()
+        return 1
+
+
+def cmd_help():
+    """Show help message."""
+    print(__doc__)
+
+
+def main():
+    """CLI entry point."""
+    if len(sys.argv) < 2:
+        cmd_help()
+        return 1
+
+    command = sys.argv[1]
+
+    commands = {
+        "start": cmd_start,
+        "status": cmd_status,
+        "metrics": cmd_metrics,
+        "test": cmd_test,
+        "help": cmd_help,
+        "-h": cmd_help,
+        "--help": cmd_help,
+    }
+
+    if command in commands:
+        try:
+            return commands[command]() or 0
+        except KeyboardInterrupt:
+            print("\n\nInterrupted")
+            return 1
+        except Exception as e:
+            print(f"\n❌ Error: {e}")
+            return 1
+    else:
+        print(f"❌ Unknown command: {command}")
+        cmd_help()
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

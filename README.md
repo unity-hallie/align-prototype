@@ -172,3 +172,60 @@ Migration Notes
 - Now: set `REFLECTION_UI_DATA_DIR` to keep artifacts outside the repo (recommended)
 - If you have existing Canvas cache in `.local_context/cache/canvas`, copy it into `${REFLECTION_UI_DATA_DIR}/canvas_cache`
 
+Text Export (for Testing)
+------------------------
+
+- Export full reflection summary as plaintext: `GET /summary/export/text`
+- Copy from UI: "Copy Full Report (text)" button on the summary page
+- Use this export to test outputs locally and on servers (no SMS integration required)
+
+Reflection MCP Command Resolution
+---------------------------------
+
+The UI discovers `reflection-mcp` via:
+1. `REFLECTION_MCP_CMD` env override (e.g., `../reflection-mcp/bin/reflection-mcp`)
+2. `bin/reflection-mcp` (in this repo)
+3. `bin/reflection-mcp-service` (legacy alias)
+4. `../reflection-mcp/bin/reflection-mcp` (sibling repo)
+5. `reflection-mcp` on PATH
+6. Windows fallback: `python ..\\reflection-mcp\\mcp_server.py`
+
+Windows / IIS Notes
+-------------------
+
+- Prefer a reverse proxy to a persistent process (e.g., run Gunicorn/Waitress behind IIS).
+- Ensure the service user has permission to run `reflection-mcp` and access data dir.
+- Set `REFLECTION_MCP_CMD` explicitly in the App Pool environment if PATH is not shared.
+
+Demo Readiness (Local + IIS)
+----------------------------
+
+- Use `scripts/run_windows_iis.ps1` on Windows. Set `PORT`, `REFLECTION_MCP_CMD`, `FLASK_SECRET_KEY`, and `REFLECTION_UI_DATA_DIR`.
+- Expose only via reverse proxy: bind UI to `127.0.0.1:<PORT>` and terminate TLS at IIS.
+- Healthcheck: `GET /health` returns `{ok:true}` for monitoring and proxy checks.
+
+Reverse Proxy Notes
+-------------------
+
+- Map IIS site route `/` → `http://127.0.0.1:<PORT>/` using URL Rewrite + ARR.
+- Allow only expected methods (GET/POST) and set timeouts to >= 60s for reflection operations.
+- Preserve headers; do not compress JSON bodies at the proxy layer if not needed.
+
+Deployment Checklist
+--------------------
+
+- [ ] Python 3.9+ and waitress (Windows) or gunicorn (Linux) installed
+- [ ] Set `FLASK_SECRET_KEY` (hex), `REFLECTION_UI_DATA_DIR`, and `REFLECTION_MCP_CMD`
+- [ ] Start the UI (Windows: `scripts/run_windows_iis.ps1`, Linux: gunicorn)
+- [ ] Configure IIS reverse proxy to `127.0.0.1:<PORT>`
+- [ ] Verify `GET /health` and settings page load
+- [ ] Run a sample reflection and verify `GET /summary/export/text`
+
+One-Command Local Demo
+----------------------
+
+- Run: `bash scripts/local_demo.sh`
+  - Installs dependencies
+  - Auto-detects `reflection-mcp` and persists `REFLECTION_MCP_CMD` in `.env`
+  - Starts the UI
+- Then open Settings to paste your `OPENAI_API_KEY` (stored in `.env`).

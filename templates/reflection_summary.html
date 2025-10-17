@@ -76,27 +76,28 @@
 {% endif %}
 
 <h3>📋 How Your Work Matches the Goals</h3>
-{% set all_met = summary.rubric_alignment.criteria_met and (summary.rubric_alignment.criteria_met|list|map('lower') and (summary.rubric_alignment.criteria_met|list)) %}
-{% set go = (summary.rubric_alignment.criteria_met and (summary.rubric_alignment.criteria_met.values()|list|reject('equalto', False)|list|length == summary.rubric_alignment.criteria_met|length)) %}
+{% set ra = summary.get('rubric_alignment', {}) %}
+{% set cm = ra.get('criteria_met', {}) %}
+{% set go = (cm and (cm.values()|list|reject('equalto', False)|list|length == cm|length)) %}
 <div class="card" style="background: {{ '#d5f4e6' if go else '#fadbd8' }};">
   <strong>Ready to submit?</strong> {{ 'Yes — you matched the goals.' if go else 'Not yet — focus on the suggestions below.' }}
   <div class="meta">Student view hides grading language; Instructor view shows full rubric details.</div>
 </div>
 <div style="margin-bottom: 20px;">
-    {% for criterion, met in summary.rubric_alignment.criteria_met.items() %}
+    {% for criterion, met in cm.items() %}
     <span class="rubric-check {{ 'met' if met else 'unmet' }}">
         {{ '✅' if met else '❌' }} {{ criterion.replace('_', ' ').title() }}
     </span>
-    {% if view_mode == 'instructor' and summary.rubric_alignment.details and summary.rubric_alignment.details.get(criterion) %}
+    {% if view_mode == 'instructor' and ra.details and ra.details.get(criterion) %}
     <details style="margin:6px 0 14px 0;">
       <summary class="meta" style="cursor:pointer;">Why</summary>
       <div class="meta">
-        {{ summary.rubric_alignment.details.get(criterion).rationale or '' }}
-        {% if summary.rubric_alignment.details.get(criterion).evidence %}
+        {{ ra.details.get(criterion).rationale or '' }}
+        {% if ra.details.get(criterion).evidence %}
           <div style="margin-top:6px;">
           Evidence:
           <ul>
-            {% for ev in summary.rubric_alignment.details.get(criterion).evidence %}
+            {% for ev in ra.details.get(criterion).evidence %}
               <li class="meta">“{{ ev }}”</li>
             {% endfor %}
           </ul>
@@ -109,10 +110,11 @@
 </div>
 
 <h3>🚀 Submission Readiness</h3>
-<div class="card" style="background: {{ '#d5f4e6' if summary.readiness_assessment.overall == 'ready' else '#fadbd8' }};">
-    <strong>Overall:</strong> {{ summary.readiness_assessment.overall.title() }}
+{% set rd = summary.get('readiness_assessment', {}) %}
+<div class="card" style="background: {{ '#d5f4e6' if rd.get('overall') == 'ready' else '#fadbd8' }};">
+    <strong>Overall:</strong> {{ (rd.get('overall') or 'unknown')|title }}
     <ul style="margin: 10px 0 0 0;">
-        {% for suggestion in summary.readiness_assessment.suggestions %}
+        {% for suggestion in (rd.get('suggestions') or []) %}
         <li>{{ suggestion }}</li>
         {% endfor %}
     </ul>
@@ -122,6 +124,22 @@
   {% if summary.session_id %}
     <a class="button secondary" style="text-decoration:none; margin-left:8px;" href="{{ url_for('audit_raw', kind='cost', session_id=summary.session_id) }}" target="_blank">Open Cost Log</a>
   {% endif %}
+</div>
+
+<h3>🧪 Export for Testing</h3>
+<div class="form-group" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+  <button type="button" class="secondary" onclick="copyFullReport()">Copy Full Report (text)</button>
+  <a class="button secondary" style="text-decoration:none;" href="{{ url_for('export_summary_text') }}">Download Text</a>
+  <script>
+    async function copyFullReport(){
+      try{
+        const resp = await fetch('{{ url_for('export_summary_text') }}');
+        const text = await resp.text();
+        await navigator.clipboard.writeText(text);
+        try { showToast('Full report copied'); } catch(e) {}
+      }catch(e){}
+    }
+  </script>
 </div>
 
 <h3>💰 Cost Analysis</h3>
@@ -176,7 +194,8 @@
 <h3>📝 Full Response History</h3>
 <details style="margin-top: 20px;">
     <summary style="cursor: pointer; font-weight: bold;">Show All Responses</summary>
-    {% for phase, response_data in summary.responses.items() %}
+    {% set resp_map = summary.get('responses', {}) %}
+    {% for phase, response_data in resp_map.items() %}
     <div style="margin: 20px 0; padding: 15px; background: #f8f9fa; border-radius: 4px;">
         <h4>{{ phase.replace('_', ' ').title() }}</h4>
         <p style="margin-bottom: 10px; font-style: italic;">{{ response_data.response }}</p>
@@ -192,14 +211,14 @@
 <script>
   async function copyCoaching(){
     try {
-      const items = ({{ summary.insights|tojson|safe }} || []).join('\n');
+      const items = ({{ (summary.get('insights', []))|tojson|safe }} || []).join('\n');
       await navigator.clipboard.writeText(items);
       try { showToast('Coaching notes copied'); } catch(e) {}
     } catch(e) {}
   }
   async function copyReadiness(){
     try {
-      const items = ({{ (summary.readiness_assessment.suggestions if summary.readiness_assessment else [])|tojson|safe }} || []).join('\n');
+      const items = ({{ (rd.get('suggestions') if rd else [])|tojson|safe }} || []).join('\n');
       await navigator.clipboard.writeText(items);
       try { showToast('Readiness checklist copied'); } catch(e) {}
     } catch(e) {}

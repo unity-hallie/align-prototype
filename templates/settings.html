@@ -29,16 +29,29 @@
   <p class="meta">Saved (local secrets): {{ saved_key_masked or 'not saved' }}</p>
 
   <form method="POST">
-    <label for="api_key">Set/Update API Key (stored in .local_context/secrets.env):</label>
+    <label for="api_key">Set/Update API Key (stored in .env):</label>
     <input type="password" id="api_key" name="api_key" placeholder="sk-...">
     <div style="margin-top:10px;"><button type="submit">Save Key</button></div>
   </form>
-  <div class="meta" style="margin-top:8px;">Keys are saved locally and not committed. Restart not required.</div>
+  <div class="meta" style="margin-top:8px;">Keys are saved locally in <code>.env</code> and not committed. Restart not required.</div>
 
   <form method="POST" action="{{ url_for('settings_test_key') }}" style="margin-top:10px;">
     <input type="hidden" name="test_key" value="1">
     <button type="submit">Test Key (1-token echo)</button>
   </form>
+</div>
+
+<div class="card">
+  <h3>Detected Defaults</h3>
+  {% if detected_cmd %}
+    <p class="meta">reflection-mcp command: <code>{{ detected_cmd }}</code></p>
+    <form method="POST">
+      <input type="hidden" name="adopt_defaults" value="1">
+      <button type="submit">Adopt Detected Defaults</button>
+    </form>
+  {% else %}
+    <p class="meta">Could not auto-detect reflection-mcp. Set <code>REFLECTION_MCP_CMD</code> manually if needed.</p>
+  {% endif %}
 </div>
 
 <div class="meta"><a href="{{ url_for('index') }}">Back</a></div>

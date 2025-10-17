@@ -1,0 +1,34 @@
+.layout {
+  min-height: 100vh;
+
+  &__container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: var(--space-lg);
+  }
+
+  &__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-xl);
+
+    h1 {
+      margin: 0;
+      color: #2c3e50;
+    }
+  }
+
+  &__nav {
+    display: flex;
+    gap: var(--space-sm);
+
+    a {
+      text-decoration: none;
+    }
+  }
+
+  &__main {
+    // Main content area
+  }
+}

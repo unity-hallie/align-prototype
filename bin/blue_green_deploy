@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""
+Blue-Green Deployment CLI Tool
+
+Usage:
+  blue_green_deploy status                    Show current deployment status
+  blue_green_deploy deploy                    Deploy new version (start inactive, switch)
+  blue_green_deploy switch <blue|green>       Switch traffic to version
+  blue_green_deploy rollback                  Rollback to inactive version
+  blue_green_deploy start <blue|green>        Start a version
+  blue_green_deploy stop <blue|green>         Stop a version
+  blue_green_deploy health-check              Check health of both versions
+"""
+
+import sys
+import json
+from pathlib import Path
+
+# Add parent to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from utils.blue_green import BlueGreenManager
+
+
+def print_status(status: dict):
+    """Pretty-print deployment status."""
+    print("\n" + "=" * 60)
+    print("BLUE-GREEN DEPLOYMENT STATUS")
+    print("=" * 60)
+
+    active = status["active_version"].upper()
+    active_port = status["active_port"]
+    print(f"\n🎯 Active Version: {active} (port {active_port})")
+
+    print(f"\n📊 Blue Instance:")
+    blue = status["blue"]
+    print(f"   Port: {blue['port']}")
+    print(f"   Status: {blue['status']}")
+    print(f"   Healthy: {'✅' if blue['healthy'] else '❌'}")
+    if blue["pid"]:
+        print(f"   PID: {blue['pid']}")
+
+    print(f"\n📊 Green Instance:")
+    green = status["green"]
+    print(f"   Port: {green['port']}")
+    print(f"   Status: {green['status']}")
+    print(f"   Healthy: {'✅' if green['healthy'] else '❌'}")
+    if green["pid"]:
+        print(f"   PID: {green['pid']}")
+
+    if status["last_switch"]:
+        print(f"\n⏱️  Last Switch: {status['last_switch']}")
+
+    if status["history"]:
+        print(f"\n📜 Recent Deployments:")
+        for entry in reversed(status["history"][-5:]):
+            ts = entry["timestamp"]
+            frm = entry["from"].upper()
+            to = entry["to"].upper()
+            print(f"   {ts}: {frm} → {to}")
+
+    print("\n" + "=" * 60 + "\n")
+
+
+def main():
+    """CLI entry point."""
+    if len(sys.argv) < 2:
+        print(__doc__)
+        sys.exit(1)
+
+    command = sys.argv[1]
+    app_path = Path(__file__).parent.parent / "app.py"
+    manager = BlueGreenManager(str(app_path))
+
+    if command == "status":
+        status = manager.get_status()
+        print_status(status)
+
+    elif command == "deploy":
+        print("\n🚀 Starting blue-green deployment...")
+        if manager.deploy_new_version():
+            print("\n✅ Deployment complete!")
+            status = manager.get_status()
+            print_status(status)
+        else:
+            print("\n❌ Deployment failed!")
+            sys.exit(1)
+
+    elif command == "switch":
+        if len(sys.argv) < 3 or sys.argv[2] not in ("blue", "green"):
+            print("Usage: blue_green_deploy switch <blue|green>")
+            sys.exit(1)
+        version = sys.argv[2]
+        print(f"\n🔄 Switching traffic to {version}...")
+        if manager.switch_traffic(version):
+            print(f"\n✅ Switched to {version}")
+            status = manager.get_status()
+            print_status(status)
+        else:
+            print(f"\n❌ Failed to switch to {version}")
+            sys.exit(1)
+
+    elif command == "rollback":
+        print("\n⏮️  Rolling back...")
+        if manager.rollback():
+            print("\n✅ Rollback complete!")
+            status = manager.get_status()
+            print_status(status)
+        else:
+            print("\n❌ Rollback failed!")
+            sys.exit(1)
+
+    elif command == "start":
+        if len(sys.argv) < 3 or sys.argv[2] not in ("blue", "green"):
+            print("Usage: blue_green_deploy start <blue|green>")
+            sys.exit(1)
+        version = sys.argv[2]
+        print(f"\n🚀 Starting {version}...")
+        pid = manager.start_instance(version)
+        if pid:
+            print(f"\n✅ {version} started (PID {pid})")
+            status = manager.get_status()
+            print_status(status)
+        else:
+            print(f"\n❌ Failed to start {version}")
+            sys.exit(1)
+
+    elif command == "stop":
+        if len(sys.argv) < 3 or sys.argv[2] not in ("blue", "green"):
+            print("Usage: blue_green_deploy stop <blue|green>")
+            sys.exit(1)
+        version = sys.argv[2]
+        print(f"\n🛑 Stopping {version}...")
+        if manager.stop_instance(version):
+            print(f"\n✅ {version} stopped")
+            status = manager.get_status()
+            print_status(status)
+        else:
+            print(f"\n❌ Failed to stop {version}")
+            sys.exit(1)
+
+    elif command == "health-check":
+        print("\n🏥 Checking health...\n")
+        blue_healthy = manager._health_check(manager.blue_port)
+        green_healthy = manager._health_check(manager.green_port)
+
+        print(f"Blue (port {manager.blue_port}): {'✅ Healthy' if blue_healthy else '❌ Unhealthy'}")
+        print(f"Green (port {manager.green_port}): {'✅ Healthy' if green_healthy else '❌ Unhealthy'}\n")
+
+    else:
+        print(f"Unknown command: {command}")
+        print(__doc__)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

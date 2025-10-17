@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+import sys, json, os
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+STATE = ROOT / '.local_context' / 'auth_mcp_secrets.json'
+STATE.parent.mkdir(parents=True, exist_ok=True)
+
+def main():
+    data = sys.stdin.read()
+    try:
+        req = json.loads(data.strip())
+    except Exception:
+        req = {}
+    params = (req.get('params') or {})
+    name = params.get('name')
+    args = params.get('arguments') or {}
+    result_text = ''
+    if name == 'put_secret':
+        # persist in local state
+        state = {}
+        if STATE.exists():
+            try:
+                state = json.loads(STATE.read_text())
+            except Exception:
+                state = {}
+        state[str(args.get('name',''))] = args.get('value','')
+        STATE.write_text(json.dumps(state))
+        result_text = json.dumps({'ok': True})
+    elif name == 'get_secret':
+        found = False
+        value = None
+        if STATE.exists():
+            try:
+                state = json.loads(STATE.read_text())
+                key = str(args.get('name',''))
+                if key in state and state[key]:
+                    found = True
+                    value = state[key]
+            except Exception:
+                pass
+        result_text = json.dumps({'found': found, 'value': value})
+    else:
+        result_text = json.dumps({'error': 'unknown_method'})
+
+    resp = {
+        'result': {
+            'content': [{'text': result_text}]
+        }
+    }
+    sys.stdout.write(json.dumps(resp))
+
+if __name__ == '__main__':
+    main()
+

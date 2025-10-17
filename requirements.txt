@@ -1,7 +1,17 @@
-# Reflection UI Dependencies
-# Standalone Flask UI for Reflection MCP
-
+# ALIGN Prototype - Flask Application
+# Core web framework and CSRF protection
 Flask>=3.0.0
 requests>=2.31.0
+flask-wtf>=1.2.1  # CSRF protection
+Werkzeug>=3.0.0   # Includes ProxyFix middleware
 
-# All other imports are Python stdlib (json, os, sys, subprocess, pathlib, time, etc.)
+# Production WSGI server (for IIS/Waitress deployment)
+waitress>=2.1.2
+
+# Testing & Development
+pytest>=7.4.0
+pytest-flask>=1.3.0
+pytest-cov>=4.1.0
+
+# Standard library imports handled by app.py:
+# json, os, sys, subprocess, pathlib, time, hashlib, urllib, re, threading, logging

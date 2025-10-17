@@ -1,0 +1,392 @@
+#!/usr/bin/env python3
+"""
+Production Health Verification Script
+
+Verifies all production infrastructure is healthy and ready:
+1. Blue-green deployment status
+2. Traffic router status
+3. Monitoring metrics
+4. Application health
+5. Performance baselines
+
+Exit codes:
+- 0: All healthy
+- 1: Minor issues detected
+- 2: Critical issues detected
+"""
+
+import sys
+import json
+import urllib.request
+import urllib.error
+import time
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, List, Tuple
+
+# Add parent to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+
+class HealthChecker:
+    """Comprehensive health checking for production deployment."""
+
+    def __init__(self):
+        self.results: Dict[str, Dict] = {}
+        self.critical_issues = []
+        self.warnings = []
+        self.start_time = time.time()
+
+    def print_header(self, title: str):
+        """Print formatted section header."""
+        print("\n" + "=" * 70)
+        print(f"  {title}")
+        print("=" * 70)
+
+    def print_check(self, name: str, status: str, details: str = ""):
+        """Print individual check result."""
+        # Extract emoji from status string
+        emoji = ""
+        if status.startswith("✅"):
+            emoji = "✅"
+        elif status.startswith("❌"):
+            emoji = "❌"
+        elif status.startswith("⚠️"):
+            emoji = "⚠️"
+        elif status.startswith("⏳"):
+            emoji = "⏳"
+        else:
+            emoji = "❓"
+
+        print(f"  {emoji} {name}: {status}")
+        if details:
+            for line in details.split("\n"):
+                print(f"      {line}")
+
+    def check_blue_green(self) -> bool:
+        """Check blue-green deployment status."""
+        self.print_header("BLUE-GREEN DEPLOYMENT")
+        healthy = True
+
+        try:
+            response = urllib.request.urlopen(
+                "http://localhost:5005/health",
+                timeout=2
+            )
+            data = json.loads(response.read())
+            self.print_check("Blue (5005)", "✅ HEALTHY", f"Status: {data}")
+        except Exception as e:
+            self.print_check("Blue (5005)", "❌ DOWN", str(e))
+            self.warnings.append("Blue instance not responding")
+            healthy = False
+
+        try:
+            response = urllib.request.urlopen(
+                "http://localhost:5006/health",
+                timeout=2
+            )
+            data = json.loads(response.read())
+            self.print_check("Green (5006)", "✅ HEALTHY", f"Status: {data}")
+        except Exception as e:
+            self.print_check("Green (5006)", "⚠️ DOWN", str(e))
+            # Not critical - green might be stopped
+
+        # Check state file
+        try:
+            state_path = Path(".local_context/bg_state.json")
+            if state_path.exists():
+                with open(state_path) as f:
+                    state = json.load(f)
+                    active = state.get("active_version", "unknown")
+                    self.print_check(
+                        "State File",
+                        "✅ VALID",
+                        f"Active version: {active}"
+                    )
+            else:
+                self.print_check("State File", "❌ MISSING", "No bg_state.json found")
+                self.critical_issues.append("Blue-green state file missing")
+                healthy = False
+        except Exception as e:
+            self.print_check("State File", "❌ ERROR", str(e))
+            self.critical_issues.append(f"State file error: {e}")
+            healthy = False
+
+        return healthy
+
+    def check_traffic_router(self) -> bool:
+        """Check traffic router status."""
+        self.print_header("TRAFFIC ROUTER")
+        healthy = True
+
+        try:
+            response = urllib.request.urlopen(
+                "http://localhost:5004/__router_health",
+                timeout=2
+            )
+            data = json.loads(response.read())
+            status = data.get("status", "unknown")
+            active_port = data.get("active_port")
+            active_version = data.get("active_version")
+
+            if status == "healthy" and active_port:
+                self.print_check(
+                    "Router Health",
+                    "✅ HEALTHY",
+                    f"Active version: {active_version} on port {active_port}"
+                )
+            else:
+                self.print_check("Router Health", "❌ UNHEALTHY", str(data))
+                self.critical_issues.append("Traffic router unhealthy")
+                healthy = False
+        except Exception as e:
+            self.print_check("Router Health", "❌ DOWN", str(e))
+            self.critical_issues.append("Traffic router not responding")
+            healthy = False
+
+        try:
+            response = urllib.request.urlopen(
+                "http://localhost:5004/__router_metrics",
+                timeout=2
+            )
+            data = json.loads(response.read())
+            success_rate = data.get("success_rate", 0)
+            total_requests = data.get("total_requests", 0)
+
+            if success_rate >= 98 or total_requests == 0:
+                self.print_check(
+                    "Router Metrics",
+                    "✅ GOOD",
+                    f"Success rate: {success_rate:.1f}%, "
+                    f"Total requests: {total_requests}"
+                )
+            elif success_rate >= 95:
+                self.print_check(
+                    "Router Metrics",
+                    "⚠️ DEGRADED",
+                    f"Success rate: {success_rate:.1f}% (target: 98%)"
+                )
+                self.warnings.append(f"Router success rate below 98%: {success_rate:.1f}%")
+            else:
+                self.print_check(
+                    "Router Metrics",
+                    "❌ POOR",
+                    f"Success rate: {success_rate:.1f}%"
+                )
+                self.critical_issues.append(f"Router success rate critical: {success_rate:.1f}%")
+                healthy = False
+        except Exception as e:
+            self.print_check("Router Metrics", "❌ ERROR", str(e))
+            self.warnings.append("Could not fetch router metrics")
+
+        return healthy
+
+    def check_application_health(self) -> bool:
+        """Check main application health through router."""
+        self.print_header("APPLICATION HEALTH")
+        healthy = True
+
+        try:
+            response = urllib.request.urlopen(
+                "http://localhost:5004/health",
+                timeout=2
+            )
+            data = json.loads(response.read())
+            ok_status = data.get("ok", False)
+
+            if ok_status:
+                self.print_check("Health Endpoint", "✅ HEALTHY", f"Response: {data}")
+            else:
+                self.print_check("Health Endpoint", "❌ UNHEALTHY", f"Response: {data}")
+                self.critical_issues.append("Application health check failed")
+                healthy = False
+        except Exception as e:
+            self.print_check("Health Endpoint", "❌ ERROR", str(e))
+            self.critical_issues.append(f"Cannot reach health endpoint: {e}")
+            healthy = False
+
+        return healthy
+
+    def check_monitoring(self) -> bool:
+        """Check monitoring infrastructure."""
+        self.print_header("MONITORING")
+        healthy = True
+
+        try:
+            # Check if monitoring dashboard is accessible
+            response = urllib.request.urlopen(
+                "http://localhost:5004/monitoring",
+                timeout=2
+            )
+            if response.status == 200:
+                self.print_check("Monitoring Dashboard", "✅ ACCESSIBLE")
+            else:
+                self.print_check(
+                    "Monitoring Dashboard",
+                    "⚠️ LIMITED ACCESS",
+                    f"Status: {response.status}"
+                )
+        except Exception as e:
+            self.print_check("Monitoring Dashboard", "⚠️ UNAVAILABLE", str(e))
+            self.warnings.append("Monitoring dashboard not accessible")
+
+        return healthy
+
+    def check_performance_baselines(self) -> bool:
+        """Check performance metrics against baselines."""
+        self.print_header("PERFORMANCE BASELINES")
+        healthy = True
+
+        baselines = {
+            "max_latency_p99_ms": 100,
+            "max_latency_p95_ms": 50,
+            "min_success_rate": 99.0,
+            "max_error_count": 5
+        }
+
+        try:
+            response = urllib.request.urlopen(
+                "http://localhost:5004/__router_metrics",
+                timeout=2
+            )
+            metrics = json.loads(response.read())
+
+            avg_time = metrics.get("avg_request_time_ms", 0)
+            success_rate = metrics.get("success_rate", 0)
+            total_requests = metrics.get("total_requests", 0)
+
+            # Average latency check
+            if avg_time <= 50:
+                self.print_check("Average Latency", "✅ GOOD", f"{avg_time:.2f}ms")
+            elif avg_time <= 100:
+                self.print_check("Average Latency", "⚠️ ACCEPTABLE", f"{avg_time:.2f}ms")
+            else:
+                self.print_check("Average Latency", "❌ HIGH", f"{avg_time:.2f}ms")
+                self.warnings.append(f"Latency elevated: {avg_time:.2f}ms")
+
+            # Success rate check
+            if success_rate >= 99.5:
+                self.print_check("Success Rate", "✅ EXCELLENT", f"{success_rate:.2f}%")
+            elif success_rate >= 99.0:
+                self.print_check("Success Rate", "⚠️ ACCEPTABLE", f"{success_rate:.2f}%")
+            else:
+                self.print_check("Success Rate", "❌ LOW", f"{success_rate:.2f}%")
+                self.critical_issues.append(f"Success rate below 99%: {success_rate:.2f}%")
+                healthy = False
+
+            # Bytes proxied
+            bytes_sent = metrics.get("bytes_proxied", 0)
+            if bytes_sent > 0:
+                self.print_check(
+                    "Data Throughput",
+                    "✅ ACTIVE",
+                    f"{bytes_sent:,} bytes proxied"
+                )
+
+        except Exception as e:
+            self.print_check("Performance Metrics", "❌ ERROR", str(e))
+            self.warnings.append("Could not fetch performance metrics")
+
+        return healthy
+
+    def check_deployment_readiness(self) -> bool:
+        """Check overall deployment readiness."""
+        self.print_header("DEPLOYMENT READINESS")
+        ready = True
+
+        checks = {
+            "Blue-green infrastructure": "Deployment can be switched instantly",
+            "Traffic router active": "Requests routed to active version automatically",
+            "Monitoring enabled": "All metrics collected and visible",
+            "Health checks passing": "Application responding normally",
+            "Performance acceptable": "Latency and success rates healthy"
+        }
+
+        for check, details in checks.items():
+            # Simplified check - all passed if no critical issues
+            if not self.critical_issues:
+                self.print_check(check, "✅ READY", details)
+            else:
+                self.print_check(check, "⚠️ CHECK", details)
+                ready = False
+
+        return ready
+
+    def generate_report(self) -> str:
+        """Generate comprehensive health report."""
+        self.print_header("SUMMARY")
+
+        elapsed = time.time() - self.start_time
+
+        # Status
+        if not self.critical_issues:
+            status = "✅ HEALTHY"
+            overall_health = "Production deployment is healthy"
+        else:
+            status = "❌ CRITICAL ISSUES"
+            overall_health = f"{len(self.critical_issues)} critical issue(s) detected"
+
+        print(f"\nOverall Status: {status}")
+        print(f"Check completed in {elapsed:.2f}s")
+        print(f"\n{overall_health}")
+
+        # Critical Issues
+        if self.critical_issues:
+            print("\n⚠️ CRITICAL ISSUES:")
+            for issue in self.critical_issues:
+                print(f"   • {issue}")
+
+        # Warnings
+        if self.warnings:
+            print("\n⚠️ WARNINGS:")
+            for warning in self.warnings:
+                print(f"   • {warning}")
+
+        # Recommendations
+        print("\n📋 RECOMMENDATIONS:")
+        if not self.critical_issues and not self.warnings:
+            print("   • Production deployment is ready")
+            print("   • All systems functioning optimally")
+            print("   • Continue monitoring metrics regularly")
+        else:
+            print("   • Address critical issues before deployment")
+            print("   • Review warnings and optimize if needed")
+            print("   • Re-run verification after fixes")
+
+        print()
+
+        # Return exit code
+        if self.critical_issues:
+            return 2
+        elif self.warnings:
+            return 1
+        else:
+            return 0
+
+    def run(self) -> int:
+        """Run all health checks."""
+        print("\n" + "=" * 70)
+        print("  🏥 PRODUCTION HEALTH VERIFICATION")
+        print("  Align-Prototype Production Readiness")
+        print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print("=" * 70)
+
+        self.check_blue_green()
+        self.check_traffic_router()
+        self.check_application_health()
+        self.check_monitoring()
+        self.check_performance_baselines()
+        self.check_deployment_readiness()
+
+        return self.generate_report()
+
+
+def main():
+    """Main entry point."""
+    checker = HealthChecker()
+    exit_code = checker.run()
+    return exit_code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

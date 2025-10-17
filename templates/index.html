@@ -5,7 +5,7 @@
 <div class="error" style="border:2px solid #c00; padding:14px; font-size:16px;">
   <strong>LLM key required</strong> — AI features are disabled. Nothing will run until an API key is set and enabled.
   <div class="meta" style="margin-top:6px;">
-    • Click <a href="{{ url_for('settings') }}">Settings</a> to paste your key (saved locally in <code>.local_context/secrets.env</code>).<br>
+    • Click <a href="{{ url_for('settings') }}">Settings</a> to paste your key (saved locally in <code>.env</code>).<br>
     • Don’t have a key? See <a href="https://platform.openai.com/docs/quickstart" target="_blank">OpenAI Quickstart</a> or ask Hallie to provision one.
   </div>
   <div style="margin-top:10px; display:flex; gap:8px;">
@@ -205,7 +205,7 @@
       <li>Paste it in the box on the home page (Quick Save Key) or in <a href="{{ url_for('settings') }}">Settings</a>.</li>
       <li>Click “Test Key (1-token echo)” to verify with a real request ID.</li>
     </ol>
-    <div class="meta" style="margin-top:8px;">Don’t have access? Ask Hallie to provision a key. Keys are saved locally under <code>.local_context/secrets.env</code> and never committed.</div>
+    <div class="meta" style="margin-top:8px;">Don’t have access? Ask Hallie to provision a key. Keys are saved locally under <code>.env</code> and never committed.</div>
     <div style="margin-top:12px; display:flex; gap:8px;">
       <button id="key_help_close" class="secondary" type="button">Close</button>
       <a class="button" href="{{ url_for('settings') }}">Open Settings</a>

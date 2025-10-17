@@ -1,0 +1,20 @@
+// Card Component Styles
+.card {
+  background: var(--color-card);
+  padding: var(--space-xl);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: var(--space-lg);
+
+  &__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-lg);
+  }
+
+  &__title {
+    color: #2c3e50;
+    margin: 0;
+  }
+}

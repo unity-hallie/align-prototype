@@ -53,13 +53,39 @@ fi
 export PORT="$PORT_TO_USE"
 echo "→ UI: http://localhost:$PORT"
 
-# MCP server check (optional)
+# MCP server check (optional) using direct resolution
 if [[ "$SKIP_MCP" -eq 0 ]]; then
   echo "Testing reflection MCP server..."
-  if ! echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | ./bin/reflection-mcp >/dev/null 2>&1; then
-    echo "❌ reflection-mcp not responding. You can run with --skip-mcp-check to bypass."
-    echo "   Tip: try: ./bin/reflection-mcp"
+  MCP_CMD=""; MCP_CWD=""
+  if [[ -n "${REFLECTION_MCP_CMD:-}" ]]; then
+    MCP_CMD="$REFLECTION_MCP_CMD"; MCP_CWD=""
+  elif [[ -x "../reflection-mcp/bin/reflection-mcp" ]]; then
+    MCP_CMD="./bin/reflection-mcp"; MCP_CWD="../reflection-mcp"
+  elif command -v reflection-mcp >/dev/null 2>&1; then
+    MCP_CMD="reflection-mcp"; MCP_CWD=""
+  elif [[ -f "../reflection-mcp/mcp_server.py" ]]; then
+    MCP_CMD="python3 mcp_server.py"; MCP_CWD="../reflection-mcp"
+  fi
+  if [[ -z "$MCP_CMD" ]]; then
+    echo "❌ reflection-mcp command not found via REFLECTION_MCP_CMD, sibling repo, or PATH."
+    echo "   Tip: set REFLECTION_MCP_CMD, install sibling repo, or put reflection-mcp on PATH."
     exit 1
+  fi
+  TEST_JSON='{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+  if [[ -n "$MCP_CWD" ]]; then
+    if ! (cd "$MCP_CWD" && PYTHONPATH="$PWD" eval "echo '$TEST_JSON' | $MCP_CMD" >/dev/null 2>&1); then
+      echo "❌ reflection-mcp not responding."
+      echo "   Tried with CWD='$MCP_CWD' CMD='$MCP_CMD'"
+      echo "   Tip: set REFLECTION_MCP_CMD (e.g., 'python3 ../reflection-mcp/mcp_server.py'), install sibling repo, or use PATH (reflection-mcp)."
+      exit 1
+    fi
+  else
+    if ! eval "echo '$TEST_JSON' | $MCP_CMD" >/dev/null 2>&1; then
+      echo "❌ reflection-mcp not responding."
+      echo "   Tried CMD='$MCP_CMD'"
+      echo "   Tip: set REFLECTION_MCP_CMD, install sibling repo, or use PATH (reflection-mcp)."
+      exit 1
+    fi
   fi
   echo "✅ Reflection MCP server working"
 else

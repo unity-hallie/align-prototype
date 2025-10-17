@@ -47,13 +47,15 @@
   </div>
   </details>
 
+{% set pn = prompt_data.get('phase_number', 1) %}
+{% set tp = prompt_data.get('total_phases', 1) %}
+{% set progress_pct = (pn / (tp if tp else 1)) * 100 %}
 <div class="progress">
-    {% set progress_pct = (prompt_data.phase_number / prompt_data.total_phases) * 100 %}
     <div class="progress-bar" style="width: {{ progress_pct }}%"></div>
-</div>
+    </div>
 
 <p class="meta">
-    Phase {{ prompt_data.phase_number }} of {{ prompt_data.total_phases }}
+    Phase {{ pn }} of {{ tp }}
     • Type: <strong>{{ prompt_data.current_prompt.type }}</strong>
     • Phase: <strong>{{ prompt_data.current_prompt.phase }}</strong>
 </p>

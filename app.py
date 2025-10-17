@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session, send_file
+from flask_wtf.csrf import CSRFProtect
 import io
 import zipfile
 from pathlib import Path
@@ -23,7 +24,32 @@ import requests
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev_key_12345')
+
+# Trust proxy headers (X-Forwarded-For, X-Forwarded-Proto, X-Forwarded-Host)
+# Required when running behind traffic router on different port
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
+# Security: Require proper secret key (no weak fallback)
+app.secret_key = os.environ.get('FLASK_SECRET_KEY')
+if not app.secret_key:
+    # Generate ephemeral key for development (warns user)
+    import secrets
+    app.secret_key = secrets.token_hex(32)
+    print("⚠️  WARNING: No FLASK_SECRET_KEY set. Using ephemeral key (sessions won't persist across restarts)", file=sys.stderr)
+
+# Session security headers
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+# Only enable SECURE in production with HTTPS
+if os.environ.get('FLASK_ENV') == 'production':
+    app.config['SESSION_COOKIE_SECURE'] = True
+
+# CSRF Protection
+# Exempt JSON API endpoints that external tools might call
+csrf = CSRFProtect(app)
+app.config['WTF_CSRF_TIME_LIMIT'] = None  # Don't expire CSRF tokens (demo convenience)
+app.config['WTF_CSRF_CHECK_DEFAULT'] = True
 
 REPO_ROOT = Path(__file__).resolve().parent
 LOCAL_CTX = REPO_ROOT / ".local_context"
@@ -140,36 +166,110 @@ def load_last_key_test():
     return None
 
 
+def _resolve_reflection_mcp_cmd() -> list[str]:
+    """Resolve a working command to launch reflection-mcp.
+
+    Priority:
+      1) REFLECTION_MCP_CMD (env), split by shell-like whitespace
+      2) repo bin/reflection-mcp
+      3) repo bin/reflection-mcp-service (legacy alias)
+      4) sibling ../reflection-mcp/bin/reflection-mcp
+      5) bare 'reflection-mcp' on PATH
+      6) On Windows, fall back to Python entry of sibling mcp_server.py
+    """
+    # 1) explicit env override
+    override = (os.environ.get('REFLECTION_MCP_CMD') or '').strip()
+    if override:
+        try:
+            parts = [p for p in override.split(' ') if p]
+            if parts:
+                return parts
+        except Exception:
+            pass
+    # 2) repo bin names
+    for name in ("reflection-mcp", "reflection-mcp-service"):
+        cand = REPO_ROOT / 'bin' / name
+        if cand.exists():
+            return [str(cand)]
+    # 3) sibling repo bin
+    sib = REPO_ROOT.parent / 'reflection-mcp' / 'bin' / 'reflection-mcp'
+    if sib.exists():
+        return [str(sib)]
+    # 4) bare command
+    if os.name != 'nt':
+        return ["reflection-mcp"]
+    # 5) windows python entry (sibling)
+    py = REPO_ROOT.parent / 'reflection-mcp' / 'mcp_server.py'
+    if py.exists():
+        return [sys.executable, str(py)]
+    # last resort
+    return ["reflection-mcp"]
+
+
 def call_reflection_mcp(method_data):
-    """Call reflection MCP and return parsed response"""
-    # Prefer Python entry on Windows to avoid WinError 193 from shell wrappers
-    if os.name == 'nt':
-        cmd = [sys.executable, str(REPO_ROOT / 'reflection_mcp' / 'server.py')]
-    else:
-        cmd = [str(REPO_ROOT / "bin" / "reflection-mcp")]
+    """Call reflection MCP and return parsed response with retries/timeouts.
+
+    Config via env:
+      REFLECTION_MCP_TIMEOUT (seconds, default 60)
+      REFLECTION_MCP_RETRIES (default 1; total attempts = retries)
+    """
+    cmd = _resolve_reflection_mcp_cmd()
+    timeout_s = float(os.environ.get('REFLECTION_MCP_TIMEOUT', '60'))
+    retries = int(os.environ.get('REFLECTION_MCP_RETRIES', '1'))
+    retries = max(1, min(retries, 5))
     # Respect LLM enable/disable toggle by adjusting env for subprocess
     env = os.environ.copy()
-    if session.get('llm_enabled') is False:
+    # In tests, remove API key from subprocess env to avoid coupling to real keys
+    if app.config.get('TESTING'):
         env.pop('OPENAI_API_KEY', None)
-    result = subprocess.run(
-        cmd,
-        input=json.dumps(method_data) + "\n",
-        capture_output=True,
-        text=True,
-        cwd=str(REPO_ROOT),
-        env=env
-    )
+    elif session.get('llm_enabled') is False:
+        env.pop('OPENAI_API_KEY', None)
 
-    if result.returncode != 0:
-        return {"error": f"MCP Error: {result.stderr}"}
+    last_err = None
+    for attempt in range(1, retries + 1):
+        try:
+            result = subprocess.run(
+                cmd,
+                input=json.dumps(method_data) + "\n",
+                capture_output=True,
+                text=True,
+                cwd=str(REPO_ROOT),
+                env=env,
+                timeout=timeout_s
+            )
+        except subprocess.TimeoutExpired:
+            last_err = {"error": f"MCP timeout after {timeout_s}s (attempt {attempt}/{retries})"}
+            if attempt == retries:
+                return last_err
+            time.sleep(min(2 * attempt, 5))
+            continue
+        except Exception as e:
+            last_err = {"error": f"MCP invocation failed: {e}"}
+            if attempt == retries:
+                return last_err
+            time.sleep(min(2 * attempt, 5))
+            continue
 
-    try:
-        response = json.loads(result.stdout.strip())
-        if "result" in response and "content" in response["result"]:
-            return json.loads(response["result"]["content"][0]["text"])
-        return {"error": "Invalid MCP response format"}
-    except Exception as e:
-        return {"error": f"Parse error: {str(e)}"}
+        if result.returncode != 0:
+            last_err = {"error": f"MCP Error (attempt {attempt}/{retries}): {result.stderr}"}
+            if attempt == retries:
+                return last_err
+            time.sleep(min(2 * attempt, 5))
+            continue
+
+        try:
+            response = json.loads(result.stdout.strip())
+            if "result" in response and "content" in response["result"]:
+                return json.loads(response["result"]["content"][0]["text"])
+            return {"error": "Invalid MCP response format"}
+        except Exception as e:
+            last_err = {"error": f"Parse error: {str(e)}"}
+            if attempt == retries:
+                return last_err
+            time.sleep(min(2 * attempt, 5))
+            continue
+
+    return last_err or {"error": "Unknown MCP error"}
 
 @app.route('/')
 def index():
@@ -197,6 +297,110 @@ def index():
 def designer_view():
     """Dedicated Designer full-page view (replaces modal)."""
     return render_template('designer.html')
+
+@app.get('/health')
+def health():
+    """Lightweight healthcheck for reverse proxy/monitoring."""
+    try:
+        return jsonify({'ok': True, 'app': 'reflection_ui'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+# ===== Page Analytics API =====
+@app.post('/api/analytics/events')
+def analytics_track_events():
+    """Store analytics events from client."""
+    try:
+        data = request.get_json(silent=True) or {}
+        session_id = data.get('sessionId')
+        events = data.get('events', [])
+
+        if not session_id or not events:
+            return jsonify({'ok': False}), 400
+
+        # Store in local context
+        analytics_dir = LOCAL_CTX / 'analytics'
+        analytics_dir.mkdir(parents=True, exist_ok=True)
+
+        session_file = analytics_dir / f'{session_id}.json'
+        stored_events = []
+
+        # Load existing events
+        if session_file.exists():
+            try:
+                stored_events = json.loads(session_file.read_text())
+            except Exception:
+                stored_events = []
+
+        # Append new events
+        stored_events.extend(events)
+
+        # Save (keep last 5000 events per session)
+        session_file.write_text(json.dumps(stored_events[-5000:], indent=2))
+
+        return jsonify({'ok': True, 'stored': len(events)})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.get('/api/analytics/session/<session_id>')
+def analytics_get_session(session_id: str):
+    """Get analytics for a session."""
+    try:
+        session_file = LOCAL_CTX / 'analytics' / f'{session_id}.json'
+        if not session_file.exists():
+            return jsonify({'error': 'Session not found'}), 404
+
+        events = json.loads(session_file.read_text())
+
+        # Compute stats
+        stats = {
+            'session_id': session_id,
+            'event_count': len(events),
+            'pages': list(set(e.get('page') for e in events if e.get('page'))),
+            'duration_seconds': (events[-1].get('timestamp', 0) - events[0].get('timestamp', 0)) // 1000 if events else 0,
+            'clicks': len([e for e in events if e['type'] == 'click']),
+            'form_submissions': len([e for e in events if e['type'] == 'form_submit']),
+            'input_changes': len([e for e in events if e['type'] == 'input_change']),
+            'page_views': len([e for e in events if e['type'] == 'page_view']),
+            'first_event': events[0].get('timestamp') if events else None,
+            'last_event': events[-1].get('timestamp') if events else None
+        }
+
+        return jsonify({'session': stats, 'events': events})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.get('/api/analytics/sessions')
+def analytics_list_sessions():
+    """List all analytics sessions."""
+    try:
+        analytics_dir = LOCAL_CTX / 'analytics'
+        if not analytics_dir.exists():
+            return jsonify({'sessions': []})
+
+        sessions = []
+        for f in sorted(analytics_dir.glob('*.json'), key=lambda p: p.stat().st_mtime, reverse=True):
+            try:
+                events = json.loads(f.read_text())
+                if events:
+                    sessions.append({
+                        'session_id': f.stem,
+                        'event_count': len(events),
+                        'pages': len(set(e.get('page') for e in events)),
+                        'created': events[0].get('timestamp'),
+                        'last_activity': events[-1].get('timestamp')
+                    })
+            except Exception:
+                continue
+
+        return jsonify({'sessions': sessions[:50]})  # Last 50 sessions
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.get('/analytics')
+def analytics_dashboard():
+    """Analytics dashboard."""
+    return render_template('analytics_dashboard.html')
 
 @app.get('/designer/prototype')
 def designer_prototype():
@@ -281,15 +485,16 @@ def settings():
             return '*' * len(key)
         return key[:3] + '*' * (len(key) - 6) + key[-3:]
 
-    saved_path = REPO_ROOT / '.local_context' / 'secrets.env'
+    # Secrets live in .env (local, not committed); we only read the key from there
+    env_path = REPO_ROOT / '.env'
     saved_key = ''
     # Prefer auth-mcp if available
     ak = _get_openai_api_key_via_auth_mcp()
     if ak:
         saved_key = ak
-    elif saved_path.exists():
+    elif env_path.exists():
         try:
-            for line in saved_path.read_text().splitlines():
+            for line in env_path.read_text().splitlines():
                 if line.startswith('OPENAI_API_KEY='):
                     saved_key = line.split('=',1)[1].strip()
                     break
@@ -303,6 +508,30 @@ def settings():
             enabled = request.form.get('llm_enabled') == 'on'
             session['llm_enabled'] = enabled
             message = 'LLM usage ' + ('enabled' if enabled else 'disabled') + ' for this session.'
+        # Adopt detected defaults (persist current autodetected MCP command)
+        if 'adopt_defaults' in request.form:
+            try:
+                cmd = _resolve_reflection_mcp_cmd()
+                cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
+                # Write/replace REFLECTION_MCP_CMD in .env
+                lines = []
+                if env_path.exists():
+                    lines = env_path.read_text().splitlines()
+                wrote = False
+                out_lines = []
+                for raw in lines:
+                    if raw.startswith('REFLECTION_MCP_CMD='):
+                        out_lines.append(f'REFLECTION_MCP_CMD={cmd_str}')
+                        wrote = True
+                    else:
+                        out_lines.append(raw)
+                if not wrote:
+                    out_lines.append(f'REFLECTION_MCP_CMD={cmd_str}')
+                env_path.write_text("\n".join(out_lines) + "\n")
+                os.environ['REFLECTION_MCP_CMD'] = cmd_str
+                message = (message + ' ' if message else '') + 'Adopted detected defaults.'
+            except Exception as e:
+                message = f'Failed to adopt defaults: {e}'
         # Save new API key
         new_key = (request.form.get('api_key') or '').strip()
         if new_key:
@@ -312,22 +541,44 @@ def settings():
             if isinstance(res, dict) and res.get('ok'):
                 used_auth = True
             if not used_auth:
+                # Write to .env (create or update key)
                 try:
-                    saved_path.parent.mkdir(parents=True, exist_ok=True)
-                    saved_path.write_text(f"OPENAI_API_KEY={new_key}\n")
+                    lines = []
+                    if env_path.exists():
+                        lines = env_path.read_text().splitlines()
+                    wrote = False
+                    out_lines = []
+                    for raw in lines:
+                        if raw.startswith('OPENAI_API_KEY='):
+                            out_lines.append(f'OPENAI_API_KEY={new_key}')
+                            wrote = True
+                        else:
+                            out_lines.append(raw)
+                    if not wrote:
+                        out_lines.append(f'OPENAI_API_KEY={new_key}')
+                    env_path.write_text("\n".join(out_lines) + "\n")
                     os.environ['OPENAI_API_KEY'] = new_key
-                    message = (message + ' ' if message else '') + 'API key saved to local secrets.'
+                    message = (message + ' ' if message else '') + 'API key saved to .env.'
                 except Exception as e:
-                    message = f'Error saving key: {e}'
+                    message = f'Error saving key to .env: {e}'
             else:
                 message = (message + ' ' if message else '') + 'API key saved via auth-mcp.'
 
+        # Post/Redirect/Get to avoid resubmission and satisfy tests
+        return redirect(url_for('settings', msg=(message or 'Settings updated')))
+
     current_key = _get_openai_api_key_via_auth_mcp() or os.environ.get('OPENAI_API_KEY', '')
+    # Detect defaults for display
+    try:
+        detected_cmd = " ".join(_resolve_reflection_mcp_cmd())
+    except Exception:
+        detected_cmd = None
     return render_template('settings.html',
                            llm_enabled=session.get('llm_enabled', bool(current_key)),
                            current_key_masked=mask(current_key),
                            saved_key_masked=mask(saved_key),
-                           message=message)
+                           message=message,
+                           detected_cmd=detected_cmd)
 
 @app.post('/settings/test_key')
 def settings_test_key():
@@ -450,6 +701,27 @@ def start_reflection():
             used_custom = True
 
     result = call_reflection_mcp(method_data)
+
+    # Ensure defaults for template math
+    try:
+        if 'phase_number' not in result:
+            result['phase_number'] = int(session.get('phase_number') or 1)
+        if 'total_phases' not in result:
+            # try to infer from context if present later; else default 1
+            result['total_phases'] = int(result.get('total_phases') or 1)
+    except Exception:
+        pass
+
+    # Normalize summary structure for templates
+    try:
+        if 'rubric_alignment' not in result or not isinstance(result.get('rubric_alignment'), dict):
+            result['rubric_alignment'] = {'criteria_met': {}}
+        if 'readiness_assessment' not in result or not isinstance(result.get('readiness_assessment'), dict):
+            result['readiness_assessment'] = {'overall': 'unknown', 'suggestions': []}
+        if 'insights' not in result or not isinstance(result.get('insights'), list):
+            result['insights'] = []
+    except Exception:
+        pass
 
     if "error" in result:
         return render_template('error.html', error=result["error"])
@@ -580,6 +852,19 @@ def submit_response():
     }
 
     result = call_reflection_mcp(method_data)
+
+    # Normalize summary structure for templates
+    try:
+        if not isinstance(result, dict):
+            result = {}
+        if 'rubric_alignment' not in result or not isinstance(result.get('rubric_alignment'), dict):
+            result['rubric_alignment'] = {'criteria_met': {}}
+        if 'readiness_assessment' not in result or not isinstance(result.get('readiness_assessment'), dict):
+            result['readiness_assessment'] = {'overall': 'unknown', 'suggestions': []}
+        if 'insights' not in result or not isinstance(result.get('insights'), list):
+            result['insights'] = []
+    except Exception:
+        pass
 
     if "error" in result:
         return render_template('error.html', error=result["error"])
@@ -754,6 +1039,131 @@ def reflection_summary():
                            show_sustainability=show_sust,
                            feedback_msg=feedback_msg,
                            api_calls=api_calls)
+
+
+def _build_summary_text(summary: dict, cost_data: Optional[dict] = None, environmental_impact: Optional[dict] = None) -> str:
+    """Render a concise plaintext version of the reflection summary for texting/export."""
+    lines: list[str] = []
+    sid = summary.get('session_id') or ''
+    student = summary.get('student_id') or ''
+    assignment = summary.get('assignment_type') or ''
+    status = summary.get('completion_status') or ''
+    lines.append(f"Reflection Summary — Session {sid}")
+    if student:
+        lines.append(f"Student: {student}")
+    if assignment:
+        lines.append(f"Assignment: {assignment}")
+    if status:
+        lines.append(f"Status: {status}")
+    lines.append("")
+
+    insights = summary.get('insights') or []
+    if insights:
+        lines.append("Coaching Insights:")
+        for i, ins in enumerate(insights, start=1):
+            lines.append(f"  {i}. {ins}")
+        lines.append("")
+
+    ra = summary.get('rubric_alignment') or {}
+    crit = (ra.get('criteria_met') or {}) if isinstance(ra, dict) else {}
+    if crit:
+        lines.append("Rubric Alignment:")
+        for k, v in crit.items():
+            mark = "✅" if v else "❌"
+            title = str(k).replace('_', ' ').title()
+            lines.append(f"  {mark} {title}")
+        lines.append("")
+
+    ready = summary.get('readiness_assessment') or {}
+    overall = (ready.get('overall') or '').title() if isinstance(ready, dict) else ''
+    suggestions = (ready.get('suggestions') or []) if isinstance(ready, dict) else []
+    if overall or suggestions:
+        lines.append("Submission Readiness:")
+        if overall:
+            lines.append(f"  Overall: {overall}")
+        for s in suggestions:
+            lines.append(f"  - {s}")
+        lines.append("")
+
+    if cost_data and isinstance(cost_data, dict):
+        try:
+            total_tokens = cost_data.get('total_tokens')
+            total_cost = cost_data.get('total_cost_usd')
+            calls = cost_data.get('api_calls_count')
+            lines.append("Cost (from MCP logs):")
+            if total_tokens is not None:
+                lines.append(f"  Tokens: {total_tokens}")
+            if total_cost is not None:
+                lines.append(f"  Cost (USD): {total_cost}")
+            if calls is not None:
+                lines.append(f"  API Calls: {calls}")
+        except Exception:
+            pass
+        if environmental_impact and isinstance(environmental_impact, dict):
+            msg = environmental_impact.get('email_comparison')
+            if msg:
+                lines.append(f"  {msg}")
+        lines.append("")
+
+    # Responses (compact)
+    responses = summary.get('responses') or {}
+    if isinstance(responses, dict) and responses:
+        lines.append("Responses:")
+        try:
+            for phase, rdata in responses.items():
+                resp = rdata.get('response') if isinstance(rdata, dict) else rdata
+                lines.append(f"  {str(phase).replace('_',' ').title()}: {str(resp)[:280]}")
+        except Exception:
+            pass
+
+    return "\n".join(lines).strip()
+
+
+@app.get('/summary/export/text')
+def export_summary_text():
+    if 'session_id' not in session:
+        return redirect(url_for('index'))
+    # Require LLM enabled similar to summary
+    key_present = bool(os.environ.get('OPENAI_API_KEY'))
+    if not session.get('llm_enabled', key_present) or not key_present:
+        return redirect(url_for('settings'))
+
+    method_data = {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "tools/call",
+        "params": {
+            "name": "get_reflection_summary",
+            "arguments": {"session_id": session['session_id']}
+        }
+    }
+    result = call_reflection_mcp(method_data)
+    if "error" in result:
+        return render_template('error.html', error=result["error"])
+
+    cost_data = result.get('cost_analysis') or None
+    show_sust = bool(session.get('show_sustainability', False))
+    environmental_impact = {}
+    if show_sust and cost_data and isinstance(cost_data, dict):
+        try:
+            total_cost = float(cost_data.get('total_cost_usd', 0) or 0)
+            email_cost_usd = float(os.environ.get('EMAIL_COST_USD', '0.00004'))
+            ratio = total_cost / email_cost_usd if email_cost_usd > 0 else 0
+            email_msg = "Negligible vs sending an email"
+            if ratio > 1:
+                email_msg = f"~{ratio:.1f}× the cost of sending an email"
+            elif ratio > 0:
+                email_msg = f"~{(1/ratio):.1f}× less than sending an email"
+            environmental_impact = {'email_comparison': email_msg}
+        except Exception:
+            pass
+
+    text = _build_summary_text(result, cost_data=cost_data, environmental_impact=environmental_impact)
+    buf = io.BytesIO(text.encode('utf-8'))
+    return send_file(buf, mimetype='text/plain', as_attachment=True, download_name=f"summary_{session['session_id']}.txt")
+
+
+## SMS functionality removed based on updated requirements (testable, not textable).
 
 @app.route('/about')
 def about():

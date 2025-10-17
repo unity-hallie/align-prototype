@@ -109,6 +109,7 @@
             <a href="{{ url_for('settings') }}" class="button secondary" style="text-decoration:none;">Settings</a>
             <a href="{{ url_for('audit_index') }}" class="button secondary" style="text-decoration:none; margin-left:8px;">Audit</a>
             <a href="{{ url_for('doc_demo_script') }}" class="button secondary" style="text-decoration:none; margin-left:8px;">Demo Script</a>
+            <a href="{{ url_for('analytics_dashboard') }}" class="button secondary" style="text-decoration:none; margin-left:8px;">Analytics</a>
             <a id="feedback-link" href="#" class="button secondary" style="text-decoration:none; margin-left:8px;">Feedback</a>
           </div>
         </div>
@@ -147,15 +148,26 @@
         t.style.display = 'block';
         setTimeout(()=>{ t.style.display='none'; }, ms);
       }
-      // Show a loading overlay on any form submit
+      // Auto-inject CSRF token into all forms + show loading overlay on submit
       document.addEventListener('DOMContentLoaded', () => {
         const overlay = document.getElementById('loading-overlay');
         document.querySelectorAll('form').forEach(f => {
+          // Auto-inject CSRF token if not already present
+          if (!f.querySelector('input[name="csrf_token"]')) {
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrf_token';
+            csrfInput.value = '{{ csrf_token() }}';
+            f.insertBefore(csrfInput, f.firstChild);
+          }
+          // Show loading overlay on submit
           f.addEventListener('submit', () => {
             if (overlay) overlay.style.display = 'flex';
           });
         });
       });
     </script>
+    <!-- Page Analytics Tracker -->
+    <script src="{{ url_for('static', filename='analytics.js') }}"></script>
 </body>
 </html>
