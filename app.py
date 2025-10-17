@@ -210,13 +210,90 @@ def call_reflection_mcp(method_data):
     """Call reflection MCP and return parsed response with retries/timeouts.
 
     Config via env:
+      REFLECTION_MCP_MODE (default 'subprocess'; set to 'service' for HTTP calls)
+      REFLECTION_MCP_SERVICE_URL (required if mode='service'; e.g., http://localhost:3000)
+      REFLECTION_MCP_AUTH_TOKEN (optional; sent as Authorization: Bearer token)
       REFLECTION_MCP_TIMEOUT (seconds, default 60)
       REFLECTION_MCP_RETRIES (default 1; total attempts = retries)
     """
-    cmd = _resolve_reflection_mcp_cmd()
+    mode = os.environ.get('REFLECTION_MCP_MODE', 'subprocess').lower()
     timeout_s = float(os.environ.get('REFLECTION_MCP_TIMEOUT', '60'))
     retries = int(os.environ.get('REFLECTION_MCP_RETRIES', '1'))
     retries = max(1, min(retries, 5))
+
+    if mode == 'service':
+        return _call_reflection_mcp_service(method_data, timeout_s, retries)
+    else:
+        return _call_reflection_mcp_subprocess(method_data, timeout_s, retries)
+
+
+def _call_reflection_mcp_service(method_data, timeout_s, retries):
+    """Call reflection-mcp as an HTTP microservice with optional auth."""
+    service_url = os.environ.get('REFLECTION_MCP_SERVICE_URL', '').strip()
+    if not service_url:
+        return {"error": "REFLECTION_MCP_SERVICE_URL not set (required when REFLECTION_MCP_MODE=service)"}
+
+    auth_token = os.environ.get('REFLECTION_MCP_AUTH_TOKEN', '').strip()
+    headers = {
+        'Content-Type': 'application/json',
+    }
+    if auth_token:
+        headers['Authorization'] = f'Bearer {auth_token}'
+
+    last_err = None
+    for attempt in range(1, retries + 1):
+        try:
+            response = requests.post(
+                service_url,
+                json=method_data,
+                headers=headers,
+                timeout=timeout_s
+            )
+            response.raise_for_status()
+            try:
+                result = response.json()
+                # If service returns MCP-style response
+                if "result" in result and "content" in result["result"]:
+                    return json.loads(result["result"]["content"][0]["text"])
+                # If service returns direct response
+                return result
+            except Exception as e:
+                last_err = {"error": f"Service response parse error: {str(e)}"}
+                if attempt == retries:
+                    return last_err
+                time.sleep(min(2 * attempt, 5))
+                continue
+        except requests.exceptions.Timeout:
+            last_err = {"error": f"MCP service timeout after {timeout_s}s (attempt {attempt}/{retries})"}
+            if attempt == retries:
+                return last_err
+            time.sleep(min(2 * attempt, 5))
+            continue
+        except requests.exceptions.ConnectionError:
+            last_err = {"error": f"MCP service unreachable at {service_url} (attempt {attempt}/{retries})"}
+            if attempt == retries:
+                return last_err
+            time.sleep(min(2 * attempt, 5))
+            continue
+        except requests.exceptions.HTTPError as e:
+            last_err = {"error": f"MCP service error {e.response.status_code} (attempt {attempt}/{retries}): {e.response.text[:200]}"}
+            if attempt == retries:
+                return last_err
+            time.sleep(min(2 * attempt, 5))
+            continue
+        except Exception as e:
+            last_err = {"error": f"MCP service call failed: {e}"}
+            if attempt == retries:
+                return last_err
+            time.sleep(min(2 * attempt, 5))
+            continue
+
+    return last_err or {"error": "Unknown MCP service error"}
+
+
+def _call_reflection_mcp_subprocess(method_data, timeout_s, retries):
+    """Call reflection-mcp as a subprocess (original behavior)."""
+    cmd = _resolve_reflection_mcp_cmd()
     # Respect LLM enable/disable toggle by adjusting env for subprocess
     env = os.environ.copy()
     # In tests, remove API key from subprocess env to avoid coupling to real keys
